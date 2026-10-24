@@ -1,0 +1,1113 @@
+// Componentes compartidos de oxide::* — tarjeta, anillo, barra, chip, navegación flotante,
+// campos, botones con pátina de óxido, hoja inferior y aviso. Solo dependen de los tokens.
+
+import { Theme, Patina, Motion } from "tokens.slint";
+
+// Curvas de la suite: salida suave para casi todo y un ligero rebote para lo que «aterriza».
+// ease-out-quart: cubic-bezier(0.25, 1, 0.5, 1) · ease-out-back: cubic-bezier(0.34, 1.56, 0.64, 1)
+
+// ───────────────────────── Texto ─────────────────────────
+
+// Etiqueta en mayúsculas, monoespaciada, con tracking 0.1em.
+export component Label inherits Text {
+    font-family: Theme.font-mono;
+    font-size: 11px;
+    letter-spacing: self.font-size * Theme.tracking;
+    color: Theme.muted;
+    vertical-alignment: center;
+}
+
+// Cifras de lista y texto técnico.
+export component Mono inherits Text {
+    font-family: Theme.font-mono;
+    font-size: 14px;
+    color: Theme.ink;
+    vertical-alignment: center;
+}
+
+// Cifras grandes dot-matrix.
+export component DotText inherits Text {
+    font-family: Theme.font-dot;
+    font-weight: 900;
+    color: Theme.ink;
+}
+
+// Cifra Doto que cuenta hasta su valor cuando cambia («1.122», separador es-ES).
+export component DotCounter inherits Text {
+    in property <int> value;
+    in property <duration> duration: 700ms;
+    property <float> shown: Motion.ready ? root.value : 0;
+    animate shown { duration: root.duration; easing: ease-out-quart; }
+    property <int> n: Math.round(Math.max(0, root.shown));
+    property <int> rest: Math.mod(root.n, 1000);
+    text: root.n < 1000
+        ? "\{root.n}"
+        : "\{Math.floor(root.n / 1000)}." + (root.rest < 10 ? "00" : root.rest < 100 ? "0" : "") + "\{root.rest}";
+    font-family: Theme.font-dot;
+    font-weight: 900;
+    color: Theme.ink;
+    accessible-role: AccessibleRole.text;
+    accessible-label: "\{root.value}";
+}
+
+// Cifra Doto con unidad mono alineada a la línea base (p. ej. «72,4 kg»).
+export component DotValue {
+    in property <string> value;
+    in property <string> unit;
+    in property <length> size: 34px;
+    in property <length> unit-size: 10px;
+    accessible-role: AccessibleRole.text;
+    accessible-label: root.value + " " + root.unit;
+
+    HorizontalLayout {
+        alignment: start;
+        spacing: 6px;
+        digits := Text {
+            text: root.value;
+            font-family: Theme.font-dot;
+            font-weight: 900;
+            font-size: root.size;
+            color: Theme.ink;
+            vertical-alignment: bottom;
+        }
+        if root.unit != "": VerticalLayout {
+            alignment: end;
+            // Ambos descent son negativos: la diferencia sube la unidad hasta la línea base de Doto.
+            padding-bottom: max(0px, unit-label.font-metrics.descent - digits.font-metrics.descent);
+            unit-label := Text {
+                text: root.unit;
+                font-family: Theme.font-mono;
+                font-size: root.unit-size;
+                color: Theme.muted;
+            }
+        }
+    }
+}
+
+// Texto corrido (nombres de alimento).
+export component Sans inherits Text {
+    font-family: Theme.font-sans;
+    font-weight: 500;
+    font-size: 15px;
+    color: Theme.ink;
+    vertical-alignment: center;
+}
+
+// ───────────────────────── Iconos ─────────────────────────
+// Trazos en una retícula de 24 unidades, extremos redondeados.
+
+export component IconPlus {
+    in property <color> color: Theme.ink;
+    in property <length> size: 22px;
+    width: root.size;
+    height: root.size;
+    accessible-role: none;
+    Path {
+        width: 100%;
+        height: 100%;
+        viewbox-width: 24;
+        viewbox-height: 24;
+        stroke: root.color;
+        stroke-width: 2px;
+        stroke-line-cap: round;
+        commands: "M12 5v14M5 12h14";
+    }
+}
+
+export component IconMinus {
+    in property <color> color: Theme.ink;
+    in property <length> size: 22px;
+    width: root.size;
+    height: root.size;
+    accessible-role: none;
+    Path {
+        width: 100%;
+        height: 100%;
+        viewbox-width: 24;
+        viewbox-height: 24;
+        stroke: root.color;
+        stroke-width: 2px;
+        stroke-line-cap: round;
+        commands: "M5 12h14";
+    }
+}
+
+export component IconClose {
+    in property <color> color: Theme.ink;
+    in property <length> size: 20px;
+    width: root.size;
+    height: root.size;
+    accessible-role: none;
+    Path {
+        width: 100%;
+        height: 100%;
+        viewbox-width: 24;
+        viewbox-height: 24;
+        stroke: root.color;
+        stroke-width: 2px;
+        stroke-line-cap: round;
+        commands: "M6 6L18 18M18 6L6 18";
+    }
+}
+
+export component IconSliders {
+    in property <color> color: Theme.ink;
+    in property <length> size: 20px;
+    width: root.size;
+    height: root.size;
+    accessible-role: none;
+    Path {
+        width: 100%;
+        height: 100%;
+        viewbox-width: 24;
+        viewbox-height: 24;
+        stroke: root.color;
+        stroke-width: 1.6px;
+        stroke-line-cap: round;
+        commands: "M3 7H11M17 7H21M14 4V10M3 17H7M13 17H21M10 14V20";
+    }
+}
+
+export component IconChevron {
+    in property <color> color: Theme.muted;
+    in property <length> size: 16px;
+    width: root.size;
+    height: root.size;
+    accessible-role: none;
+    Path {
+        width: 100%;
+        height: 100%;
+        viewbox-width: 24;
+        viewbox-height: 24;
+        stroke: root.color;
+        stroke-width: 2px;
+        stroke-line-cap: round;
+        stroke-line-join: round;
+        commands: "M9 5L16 12L9 19";
+    }
+}
+
+export component IconMic {
+    in property <color> color: Theme.ink;
+    in property <length> size: 22px;
+    width: root.size;
+    height: root.size;
+    accessible-role: none;
+    Path {
+        width: 100%;
+        height: 100%;
+        viewbox-width: 24;
+        viewbox-height: 24;
+        stroke: root.color;
+        stroke-width: 2px;
+        stroke-line-cap: round;
+        commands: "M12 3.5C10.34 3.5 9 4.84 9 6.5V11.5C9 13.16 10.34 14.5 12 14.5C13.66 14.5 15 13.16 15 11.5V6.5C15 4.84 13.66 3.5 12 3.5Z M5.5 11A6.5 6.5 0 0 0 18.5 11 M12 17.5V20.5";
+    }
+}
+
+// ───────────────────────── Superficies ─────────────────────────
+
+// Tarjeta tipo widget de Nothing OS. Aparece con un leve fundido y escala
+// (`enter-delay` permite escalonar las de una misma pantalla).
+export component Card inherits Rectangle {
+    in property <length> radius: Theme.radius-macro;
+    in property <duration> enter-delay: 0ms;
+    property <bool> shown;
+    background: Theme.card;
+    border-radius: root.radius;
+    opacity: root.shown && Motion.ready ? 1 : 0;
+    transform-scale: root.shown && Motion.ready ? 1 : 0.96;
+    animate opacity { duration: 380ms; delay: root.enter-delay; easing: ease-out-quart; }
+    animate transform-scale { duration: 560ms; delay: root.enter-delay; easing: ease-out-back; }
+    init => {
+        root.shown = true;
+    }
+}
+
+// Contenedor que aparece con fundido al crearse (vistas de una hoja, filas nuevas).
+export component FadeIn inherits Rectangle {
+    in property <duration> enter-delay: 0ms;
+    property <bool> shown;
+    opacity: root.shown && Motion.ready ? 1 : 0;
+    transform-scale: root.shown && Motion.ready ? 1 : 0.985;
+    animate opacity { duration: 260ms; delay: root.enter-delay; easing: ease-out-quart; }
+    animate transform-scale { duration: 360ms; delay: root.enter-delay; easing: ease-out-quart; }
+    init => {
+        root.shown = true;
+    }
+}
+
+// ───────────────────────── Indicadores ─────────────────────────
+
+// Anillo de progreso: empieza arriba, sentido horario, extremos redondeados.
+// El arco y el porcentaje se animan juntos cuando cambia el valor.
+export component Ring {
+    in property <float> progress;
+    in property <int> percent;
+    in property <length> size: 128px;
+    in property <length> thickness: 12px;
+    in property <string> description;
+    in property <length> label-size: 26px;
+
+    width: root.size;
+    height: root.size;
+    accessible-role: progress-indicator;
+    accessible-label: root.description;
+    accessible-value: "\{root.percent}%";
+
+    property <float> p: Motion.ready ? clamp(root.progress, 0, 1) : 0;
+    animate p { duration: 900ms; easing: cubic-bezier(0.22, 1, 0.36, 1); }
+    property <float> shown-percent: Motion.ready ? root.percent : 0;
+    animate shown-percent { duration: 900ms; easing: cubic-bezier(0.22, 1, 0.36, 1); }
+    property <bool> full: root.p >= 0.9995;
+    property <float> c: root.size / 1px / 2;
+    // Radio del eje del trazo: deja un margen de medio grosor, como la pista (128/12 → r 52).
+    property <float> r: root.size / 1px / 2 - root.thickness / 1px;
+    property <angle> sweep: root.p * 360deg;
+    property <float> end-x: root.c + root.r * sin(root.sweep);
+    property <float> end-y: root.c - root.r * cos(root.sweep);
+
+    // Pista (y anillo completo cuando se alcanza el objetivo).
+    Rectangle {
+        x: root.thickness / 2;
+        y: root.thickness / 2;
+        width: root.size - root.thickness;
+        height: self.width;
+        border-radius: self.width / 2;
+        border-width: root.thickness;
+        border-color: root.full ? Theme.accent : Theme.track;
+        animate border-color { duration: 300ms; }
+    }
+
+    if root.p > 0.0005 && !root.full: Path {
+        x: 0;
+        y: 0;
+        width: root.size;
+        height: root.size;
+        fit: preserve;
+        stroke: Theme.accent;
+        stroke-width: root.thickness;
+        stroke-line-cap: round;
+        commands: "M \{root.c} \{root.c - root.r} A \{root.r} \{root.r} 0 \{root.p > 0.5 ? 1 : 0} 1 \{root.end-x} \{root.end-y}";
+    }
+
+    Text {
+        width: 100%;
+        height: 100%;
+        text: "\{Math.round(root.shown-percent)}%";
+        font-family: Theme.font-dot;
+        font-weight: 900;
+        font-size: root.label-size;
+        color: Theme.ink;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+}
+
+// Barra de 4 px con relleno en acento.
+export component Bar inherits Rectangle {
+    in property <float> progress;
+    in property <duration> delay: 0ms;
+    height: 4px;
+    border-radius: 2px;
+    background: Theme.track;
+    accessible-role: progress-indicator;
+    accessible-value-minimum: 0;
+    accessible-value-maximum: 100;
+    accessible-value: "\{Math.round(clamp(root.progress, 0, 1) * 100)} %";
+
+    Rectangle {
+        x: 0;
+        y: 0;
+        height: parent.height;
+        width: Motion.ready ? parent.width * clamp(root.progress, 0, 1) : 0px;
+        border-radius: 2px;
+        background: Theme.accent;
+        animate width { duration: 800ms; delay: root.delay; easing: cubic-bezier(0.22, 1, 0.36, 1); }
+    }
+}
+
+// Chip compacto (p. ej. «1.078 restantes»).
+export component Chip inherits Rectangle {
+    in property <string> text;
+    in property <color> text-color: Theme.accent;
+    background: Theme.chip;
+    border-radius: Theme.radius-chip;
+    accessible-role: AccessibleRole.text;
+    accessible-label: root.text;
+
+    HorizontalLayout {
+        padding-left: 12px;
+        padding-right: 12px;
+        padding-top: 7px;
+        padding-bottom: 7px;
+        Text {
+            text: root.text;
+            font-family: Theme.font-mono;
+            font-size: 11px;
+            color: root.text-color;
+            vertical-alignment: center;
+        }
+    }
+}
+
+// ───────────────────────── Botones ─────────────────────────
+
+// Botón principal en acento con pátina de óxido; gris cuando está deshabilitado.
+// Se hunde un poco al pulsarlo y rebota al soltarlo.
+export component PrimaryButton inherits Rectangle {
+    in property <string> text;
+    in property <bool> enabled: true;
+    callback clicked();
+
+    height: 52px;
+    vertical-stretch: 0;
+    border-radius: self.height / 2;
+    clip: true;
+    background: !root.enabled ? Theme.track : touch.pressed ? Theme.accent.darker(0.15) : Theme.accent;
+    animate background { duration: 180ms; }
+    transform-scale: touch.pressed ? 0.965 : 1;
+    animate transform-scale { duration: 420ms; easing: ease-out-back; }
+    accessible-role: button;
+    accessible-label: root.text;
+    accessible-enabled: root.enabled;
+    accessible-action-default => {
+        if root.enabled {
+            root.clicked();
+        }
+    }
+
+    if Patina.pill.width > 0: Image {
+        width: 100%;
+        height: 100%;
+        source: Patina.pill;
+        image-fit: fill;
+        opacity: root.enabled ? 1 : 0.35;
+        animate opacity { duration: 180ms; }
+    }
+
+    Text {
+        text: root.text;
+        font-family: Theme.font-mono;
+        font-weight: 500;
+        font-size: 12px;
+        letter-spacing: self.font-size * Theme.tracking;
+        color: root.enabled ? Theme.on-accent : Theme.muted;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+        animate color { duration: 180ms; }
+    }
+
+    touch := TouchArea {
+        enabled: root.enabled;
+        clicked => {
+            root.clicked();
+        }
+    }
+}
+
+// Botón secundario: texto mono sobre superficie, para acciones como BORRAR o VOLVER.
+export component GhostButton inherits Rectangle {
+    in property <string> text;
+    in property <color> text-color: Theme.ink;
+    in property <bool> enabled: true;
+    callback clicked();
+
+    min-height: Theme.touch-min;
+    min-width: Theme.touch-min;
+    preferred-width: label.preferred-width + 32px;
+    vertical-stretch: 0;
+    horizontal-stretch: 0;
+    border-radius: self.height / 2;
+    background: touch.pressed ? Theme.nav-active : Theme.chip;
+    animate background { duration: 120ms; }
+    transform-scale: touch.pressed ? 0.95 : 1;
+    animate transform-scale { duration: 380ms; easing: ease-out-back; }
+    accessible-role: button;
+    accessible-label: root.text;
+    accessible-enabled: root.enabled;
+    accessible-action-default => {
+        if root.enabled {
+            root.clicked();
+        }
+    }
+
+    label := Text {
+        text: root.text;
+        font-family: Theme.font-mono;
+        font-weight: 500;
+        font-size: 11px;
+        letter-spacing: self.font-size * Theme.tracking;
+        color: root.enabled ? root.text-color : Theme.muted;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+
+    touch := TouchArea {
+        enabled: root.enabled;
+        clicked => {
+            root.clicked();
+        }
+    }
+}
+
+// Botón circular solo con icono (requiere etiqueta accesible).
+export component IconButton inherits Rectangle {
+    in property <string> label;
+    in property <length> size: Theme.touch-min;
+    in property <color> fill: transparent;
+    callback clicked();
+
+    width: root.size;
+    height: root.size;
+    border-radius: self.width / 2;
+    background: touch.pressed ? Theme.nav-active : root.fill;
+    animate background { duration: 120ms; }
+    transform-scale: touch.pressed ? 0.9 : 1;
+    animate transform-scale { duration: 360ms; easing: ease-out-back; }
+    accessible-role: button;
+    accessible-label: root.label;
+    accessible-action-default => {
+        root.clicked();
+    }
+
+    @children
+
+    touch := TouchArea {
+        clicked => {
+            root.clicked();
+        }
+    }
+}
+
+// Botón −/+ de 56 px con repetición al mantener pulsado.
+export component StepButton inherits Rectangle {
+    in property <string> label;
+    in property <bool> minus;
+    callback step();
+
+    width: 56px;
+    height: 56px;
+    border-radius: self.width / 2;
+    background: touch.pressed ? Theme.nav-active : Theme.chip;
+    animate background { duration: 100ms; }
+    transform-scale: touch.pressed ? 0.88 : 1;
+    animate transform-scale { duration: 420ms; easing: ease-out-back; }
+    accessible-role: button;
+    accessible-label: root.label;
+    accessible-action-default => {
+        root.step();
+    }
+
+    property <bool> repeating;
+
+    if root.minus: IconMinus {
+        color: Theme.ink;
+    }
+    if !root.minus: IconPlus {
+        color: Theme.ink;
+    }
+
+    touch := TouchArea {
+        pointer-event(event) => {
+            if event.kind == PointerEventKind.down {
+                root.step();
+                root.repeating = false;
+                hold.running = true;
+            } else if event.kind == PointerEventKind.up || event.kind == PointerEventKind.cancel {
+                hold.running = false;
+                root.repeating = false;
+            }
+        }
+    }
+
+    hold := Timer {
+        interval: root.repeating ? 70ms : 450ms;
+        running: false;
+        triggered => {
+            if !touch.pressed {
+                self.running = false;
+                root.repeating = false;
+            } else {
+                root.repeating = true;
+                root.step();
+            }
+        }
+    }
+}
+
+// ───────────────────────── Navegación flotante ─────────────────────────
+
+component NavTab inherits Rectangle {
+    in property <string> text;
+    in property <bool> active;
+    in property <int> index;
+    in property <int> count;
+    in property <bool> hidden;
+    callback clicked();
+
+    opacity: root.hidden ? 0 : 1;
+    animate opacity { duration: 180ms; easing: ease-out-quad; }
+
+    border-radius: self.height / 2;
+    accessible-role: tab;
+    accessible-label: root.text;
+    accessible-item-selectable: true;
+    accessible-item-selected: root.active;
+    accessible-item-index: root.index;
+    accessible-item-count: root.count;
+    accessible-action-default => {
+        root.clicked();
+    }
+
+    Text {
+        text: root.text;
+        font-family: Theme.font-mono;
+        font-size: 12px;
+        letter-spacing: self.font-size * Theme.tracking;
+        color: root.active ? Theme.ink : Theme.muted;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+        animate color { duration: 220ms; }
+    }
+
+    touch := TouchArea {
+        enabled: !root.hidden;
+        clicked => {
+            root.clicked();
+        }
+    }
+}
+
+// Barra flotante: pestañas con indicador deslizante + botón circular «+» con óxido.
+// Entre las pestañas y el «+» puede llevar botones propios de cada app (`@children`,
+// que ocupan `extra-width`). Con `busy` las pestañas se apartan, el «+» se recoge y la
+// barra se encoge hasta los botones extra (p. ej. mientras se graba voz).
+// Con `vertical` es un carril para la pantalla en horizontal: pestañas arriba, botones
+// debajo y un alto natural de `rail-length`.
+export component FloatingNav inherits Rectangle {
+    in property <[string]> tabs;
+    in-out property <int> current;
+    in property <string> action-label;
+    in property <length> extra-width: 0px;
+    in property <bool> busy;
+    in property <bool> vertical;
+    out property <length> rail-length: root.fab-start + Theme.fab-size + root.pad;
+    callback tab-selected(int);
+    callback action();
+
+    height: Theme.nav-height;
+    accessible-role: tab-list;
+
+    property <length> pad: 6px;
+    property <length> extra-space: root.extra-width > 0 ? root.extra-width + root.pad : 0px;
+    // Largo de cada pestaña a lo largo de la barra (en el carril son cuadradas) y su grosor.
+    property <length> tab-length: root.vertical
+        ? Theme.fab-size
+        : (root.width - 2 * root.pad - Theme.fab-size - root.extra-space - root.tabs.length * root.pad) / max(1, root.tabs.length);
+    property <length> tab-thickness: (root.vertical ? root.width : root.height) - 2 * root.pad;
+    // Dónde empiezan los botones extra y el «+», a lo largo de la barra.
+    property <length> extra-start: root.pad + root.tabs.length * (root.tab-length + root.pad);
+    property <length> fab-start: root.extra-start + root.extra-space;
+    property <length> collapsed: Theme.fab-size + root.pad;
+    property <angle> spin;
+
+    // Fondo: con `busy` se recoge hasta los botones extra.
+    Rectangle {
+        x: 0;
+        y: 0;
+        width: root.busy && !root.vertical ? root.width - root.collapsed : root.width;
+        height: root.busy && root.vertical ? root.height - root.collapsed : root.height;
+        border-radius: Theme.radius-nav;
+        background: Theme.nav;
+        animate width, height { duration: 420ms; easing: cubic-bezier(0.22, 1, 0.36, 1); }
+
+        // Absorbe toques en los huecos para que no lleguen al contenido de detrás.
+        TouchArea { }
+    }
+
+    // Indicador de la pestaña activa: se desliza con un pequeño rebote.
+    Rectangle {
+        x: root.vertical ? root.pad : root.pad + root.current * (root.tab-length + root.pad);
+        y: root.vertical ? root.pad + root.current * (root.tab-length + root.pad) : root.pad;
+        width: root.vertical ? root.tab-thickness : root.tab-length;
+        height: root.vertical ? root.tab-length : root.tab-thickness;
+        border-radius: min(self.width, self.height) / 2;
+        background: Theme.nav-active;
+        opacity: root.busy ? 0 : 1;
+        animate x, y { duration: 420ms; easing: cubic-bezier(0.3, 1.35, 0.5, 1); }
+        animate opacity { duration: 180ms; easing: ease-out-quad; }
+    }
+
+    for tab[i] in root.tabs: NavTab {
+        x: root.vertical ? root.pad : root.pad + i * (root.tab-length + root.pad);
+        y: root.vertical ? root.pad + i * (root.tab-length + root.pad) : root.pad;
+        width: root.vertical ? root.tab-thickness : root.tab-length;
+        height: root.vertical ? root.tab-length : root.tab-thickness;
+        text: tab;
+        index: i;
+        count: root.tabs.length;
+        active: i == root.current;
+        hidden: root.busy;
+        clicked => {
+            root.current = i;
+            root.tab-selected(i);
+        }
+    }
+
+    // Botones propios de la app.
+    Rectangle {
+        x: root.vertical ? root.pad : root.extra-start;
+        y: root.vertical ? root.extra-start : root.pad;
+        width: root.vertical ? root.tab-thickness : root.extra-width;
+        height: root.vertical ? root.extra-width : root.tab-thickness;
+        @children
+    }
+
+    Rectangle {
+        x: root.vertical ? root.pad : root.fab-start;
+        y: root.vertical ? root.fab-start : root.pad;
+        width: Theme.fab-size;
+        height: Theme.fab-size;
+        border-radius: self.width / 2;
+        clip: true;
+        background: fab-touch.pressed ? Theme.accent.darker(0.15) : Theme.accent;
+        animate background { duration: 120ms; }
+        opacity: root.busy ? 0 : 1;
+        animate opacity { duration: 160ms; easing: ease-out-quad; }
+        transform-scale: root.busy ? 0.3 : fab-touch.pressed ? 0.86 : 1;
+        animate transform-scale { duration: 480ms; easing: ease-out-back; }
+        accessible-role: button;
+        accessible-label: root.action-label;
+        accessible-action-default => {
+            root.action();
+        }
+        if Patina.circle.width > 0: Image {
+            width: 100%;
+            height: 100%;
+            source: Patina.circle;
+            image-fit: fill;
+        }
+        IconPlus {
+            color: Theme.on-accent;
+            size: 22px;
+            transform-rotation: root.spin;
+            animate transform-rotation { duration: 520ms; easing: ease-out-back; }
+        }
+        fab-touch := TouchArea {
+            enabled: !root.busy;
+            clicked => {
+                root.spin += 90deg;
+                root.action();
+            }
+        }
+    }
+}
+
+// ───────────────────────── Entrada ─────────────────────────
+
+// Campo de texto con etiqueta superior y sufijo opcional (kcal, g).
+export component Field inherits Rectangle {
+    in property <string> label;
+    in property <string> placeholder;
+    in property <string> suffix;
+    in property <InputType> input-type: InputType.text;
+    in property <InputMethodHints> input-hints;
+    in property <bool> invalid;
+    in property <color> placeholder-color: Theme.muted.transparentize(0.55);
+    in-out property <string> text <=> input.text;
+    out property <bool> has-focus: input.has-focus;
+    callback accepted();
+    callback edited();
+    callback back-pressed();
+
+    // `campo.focus()` enfoca el TextInput interno.
+    forward-focus: input;
+    public function blur() {
+        input.clear-focus();
+    }
+    public function select-all() {
+        input.select-all();
+    }
+
+    min-height: 62px;
+    vertical-stretch: 0;
+    border-radius: Theme.radius-field;
+    background: input.has-focus ? Theme.chip.brighter(0.12) : Theme.chip;
+    animate background { duration: 160ms; }
+    border-width: 1px;
+    border-color: input.has-focus ? Theme.accent : root.invalid ? Theme.accent.transparentize(0.5) : transparent;
+    animate border-color { duration: 160ms; }
+
+    TouchArea {
+        clicked => {
+            input.focus();
+        }
+    }
+
+    VerticalLayout {
+        padding-left: 16px;
+        padding-right: 16px;
+        padding-top: 10px;
+        padding-bottom: 10px;
+        spacing: 4px;
+
+        Label {
+            text: root.label;
+            font-size: 10px;
+            color: input.has-focus ? Theme.ink : Theme.muted;
+            animate color { duration: 160ms; }
+        }
+
+        HorizontalLayout {
+            spacing: 6px;
+            Rectangle {
+                horizontal-stretch: 1;
+                min-height: input.preferred-height;
+                input := TextInput {
+                    width: 100%;
+                    font-family: Theme.font-sans;
+                    font-weight: 500;
+                    font-size: 16px;
+                    color: Theme.ink;
+                    selection-background-color: Theme.accent.transparentize(0.6);
+                    selection-foreground-color: Theme.ink;
+                    input-type: root.input-type;
+                    input-method-hints: root.input-hints;
+                    single-line: true;
+                    vertical-alignment: center;
+                    accessible-label: root.label;
+                    accessible-placeholder-text: root.placeholder;
+                    accepted => {
+                        root.accepted();
+                    }
+                    edited => {
+                        root.edited();
+                    }
+                    key-pressed(event) => {
+                        if event.text == Key.Back || event.text == Key.Escape {
+                            root.back-pressed();
+                            return accept;
+                        }
+                        return reject;
+                    }
+                }
+                if input.text == "" && input.preedit-text == "": Text {
+                    width: 100%;
+                    text: root.placeholder;
+                    font-family: Theme.font-sans;
+                    font-weight: 500;
+                    font-size: 16px;
+                    color: root.placeholder-color;
+                    vertical-alignment: center;
+                    overflow: elide;
+                }
+            }
+            if root.suffix != "": Text {
+                text: root.suffix;
+                font-family: Theme.font-mono;
+                font-size: 12px;
+                color: Theme.muted;
+                vertical-alignment: center;
+            }
+        }
+    }
+}
+
+// Selector segmentado con indicador deslizante (7/30/60 días, comida, pestañas de una hoja…).
+export component Segmented inherits Rectangle {
+    in property <[string]> options;
+    in-out property <int> current;
+    in property <string> label;
+    // Desplazamiento extra del indicador (en opciones) mientras se arrastra con el dedo.
+    in property <float> drag-progress: 0;
+    callback changed(int);
+
+    height: 44px;
+    vertical-stretch: 0;
+    border-radius: self.height / 2;
+    background: Theme.chip;
+    accessible-role: tab-list;
+    accessible-label: root.label;
+
+    property <length> pad: 4px;
+    property <length> option-width: (root.width - 2 * root.pad - (root.options.length - 1) * root.pad) / max(1, root.options.length);
+
+    Rectangle {
+        x: root.pad + clamp(root.current + root.drag-progress, 0, root.options.length - 1) * (root.option-width + root.pad);
+        y: root.pad;
+        width: root.option-width;
+        height: root.height - 2 * root.pad;
+        border-radius: self.height / 2;
+        background: Theme.nav-active;
+        animate x { duration: 340ms; easing: cubic-bezier(0.3, 1.25, 0.5, 1); }
+    }
+
+    HorizontalLayout {
+        padding: root.pad;
+        spacing: root.pad;
+        for option[i] in root.options: Rectangle {
+            width: root.option-width;
+            border-radius: self.height / 2;
+            accessible-role: tab;
+            accessible-label: option;
+            accessible-item-selectable: true;
+            accessible-item-selected: i == root.current;
+            accessible-item-index: i;
+            accessible-item-count: root.options.length;
+            accessible-action-default => {
+                root.current = i;
+                root.changed(i);
+            }
+            Text {
+                text: option;
+                font-family: Theme.font-mono;
+                font-size: 11px;
+                letter-spacing: self.font-size * Theme.tracking;
+                color: i == root.current ? Theme.ink : Theme.muted;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+                animate color { duration: 200ms; }
+            }
+            TouchArea {
+                clicked => {
+                    if root.current != i {
+                        root.current = i;
+                        root.changed(i);
+                    }
+                }
+            }
+        }
+    }
+}
+
+// ───────────────────────── Capas ─────────────────────────
+
+// Hoja inferior modal. Se coloca a pantalla completa; el panel se eleva sobre el teclado.
+// Con `fill` ocupa toda la altura disponible (listas con buscador).
+// Se cierra tocando fuera, con atrás o arrastrándola hacia abajo desde cualquier punto
+// (si el contenido tiene scroll, solo cuando está arriba del todo: `content-at-top`).
+// En pantallas anchas se centra con `panel-max-width`; si no cabe en alto (en horizontal con el
+// teclado abierto) su contenido se desplaza.
+export component Sheet {
+    in property <bool> open;
+    in property <string> title;
+    in property <length> top-inset;
+    in property <length> bottom-inset;
+    in property <length> keyboard-height;
+    in property <bool> fill;
+    in property <bool> content-at-top: true;
+    in property <length> panel-max-width: 600px;
+    callback dismiss();
+
+    property <length> lift: max(0px, root.keyboard-height);
+    // Margen bajo el panel para que el rebote de apertura no deje ver un hueco.
+    property <length> overscan: 64px;
+    out property <length> max-body-height: root.height - root.lift - root.top-inset - 24px;
+    property <length> body-height: root.fill ? root.max-body-height : min(root.max-body-height, body.preferred-height);
+    property <length> panel-width: min(root.width, root.panel-max-width);
+    property <bool> overflowing: body.min-height > root.max-body-height + 0.5px
+        || (!root.fill && body.preferred-height > root.max-body-height + 0.5px);
+    property <length> scroll-height: root.fill ? body.min-height : body.preferred-height;
+
+    // Arrastre hacia abajo: desplazamiento del panel y vuelta a su sitio si no se cierra.
+    property <length> drag;
+    property <bool> settling;
+    property <length> dismiss-distance: max(80px, min(160px, root.body-height * 0.2));
+
+    changed open => {
+        if root.open {
+            root.drag = 0;
+            root.settling = false;
+        }
+    }
+
+    scrim := Rectangle {
+        width: 100%;
+        height: 100%;
+        background: Theme.scrim;
+        opacity: root.open ? 1 - 0.7 * clamp(root.drag / max(1px, root.body-height), 0, 1) : 0;
+        visible: self.opacity > 0.01;
+        animate opacity { duration: 200ms; easing: ease-out-quad; }
+        TouchArea {
+            enabled: root.open;
+            clicked => {
+                root.dismiss();
+            }
+        }
+    }
+
+    Timer {
+        interval: 16ms;
+        running: root.settling;
+        triggered => {
+            if root.drag < 1px {
+                root.drag = 0;
+                root.settling = false;
+            } else {
+                root.drag = root.drag * 0.7;
+            }
+        }
+    }
+
+    // El gestor del gesto queda fijo en la posición de reposo del panel; el panel se
+    // desplaza dentro de él, así las coordenadas del dedo no dependen del arrastre.
+    SwipeGestureHandler {
+        x: (root.width - root.panel-width) / 2;
+        width: root.panel-width;
+        height: root.body-height + root.overscan;
+        y: root.open ? root.height - root.body-height - root.lift : root.height + 8px;
+        visible: root.open || self.y < root.height;
+        animate y { duration: 480ms; easing: cubic-bezier(0.2, 1.15, 0.38, 1); }
+        enabled: root.open && !root.settling;
+        handle-swipe-down: root.content-at-top && (!root.overflowing || scroller.content-y >= -1px);
+        moved => {
+            if self.swiping {
+                root.drag = max(0px, self.current-position.y - self.pressed-position.y);
+            }
+        }
+        swiped => {
+            if root.drag > root.dismiss-distance {
+                root.dismiss();
+            } else {
+                root.settling = true;
+            }
+        }
+        cancelled => {
+            root.settling = true;
+        }
+
+        panel := Rectangle {
+            x: 0;
+            y: root.drag;
+            width: parent.width;
+            height: parent.height;
+            background: Theme.card;
+            border-top-left-radius: Theme.radius-hero;
+            border-top-right-radius: Theme.radius-hero;
+            accessible-role: groupbox;
+            accessible-label: root.title;
+
+            // Evita que los toques dentro del panel cierren la hoja.
+            TouchArea { }
+
+            scroller := Flickable {
+                x: 0;
+                y: 0;
+                width: parent.width;
+                height: root.body-height;
+                interactive: root.overflowing;
+                content-height: root.overflowing ? root.scroll-height : root.body-height;
+
+                body := VerticalLayout {
+                    x: 0;
+                    y: 0;
+                    width: scroller.width;
+                    height: root.overflowing ? root.scroll-height : root.body-height;
+                    padding-left: 20px;
+                    padding-right: 20px;
+                    padding-top: 10px;
+                    padding-bottom: 20px + (root.lift > 0 ? 0px : root.bottom-inset);
+                    spacing: 14px;
+
+                    HorizontalLayout {
+                        vertical-stretch: 0;
+                        alignment: center;
+                        Rectangle {
+                            width: 36px;
+                            height: 4px;
+                            border-radius: 2px;
+                            background: Theme.track;
+                        }
+                    }
+
+                    HorizontalLayout {
+                        vertical-stretch: 0;
+                        alignment: space-between;
+                        Label {
+                            text: root.title;
+                            font-size: 12px;
+                            color: Theme.ink;
+                        }
+                        IconButton {
+                            label: "Cerrar";
+                            clicked => {
+                                root.dismiss();
+                            }
+                            IconClose {
+                                color: Theme.muted;
+                            }
+                        }
+                    }
+
+                    @children
+                }
+            }
+        }
+    }
+}
+
+// Aviso flotante con acción (p. ej. «Entrada borrada · DESHACER»). Entra con un pequeño rebote.
+export component Toast inherits Rectangle {
+    in property <string> text;
+    in property <string> action;
+    in property <bool> shown;
+    callback action-clicked();
+
+    height: 52px;
+    border-radius: self.height / 2;
+    background: Theme.nav-active;
+    opacity: root.shown ? 1 : 0;
+    transform-scale: root.shown ? 1 : 0.9;
+    visible: self.opacity > 0.01;
+    animate opacity { duration: 200ms; }
+    animate transform-scale { duration: 420ms; easing: ease-out-back; }
+    accessible-role: AccessibleRole.text;
+    accessible-label: root.text;
+
+    TouchArea { enabled: root.shown; }
+
+    HorizontalLayout {
+        padding-left: 20px;
+        padding-right: 6px;
+        padding-top: 6px;
+        padding-bottom: 6px;
+        spacing: 8px;
+        Text {
+            horizontal-stretch: 1;
+            text: root.text;
+            font-family: Theme.font-sans;
+            font-weight: 500;
+            font-size: 14px;
+            color: Theme.ink;
+            vertical-alignment: center;
+            overflow: elide;
+        }
+        if root.action != "": Rectangle {
+            width: action-label.preferred-width + 28px;
+            border-radius: self.height / 2;
+            background: action-touch.pressed ? Theme.chip : transparent;
+            accessible-role: button;
+            accessible-label: root.action;
+            accessible-action-default => {
+                root.action-clicked();
+            }
+            action-label := Text {
+                text: root.action;
+                font-family: Theme.font-mono;
+                font-weight: 500;
+                font-size: 12px;
+                letter-spacing: self.font-size * Theme.tracking;
+                color: Theme.accent;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+            }
+            action-touch := TouchArea {
+                enabled: root.shown;
+                clicked => {
+                    root.action-clicked();
+                }
+            }
+        }
+    }
+}

@@ -1,0 +1,1264 @@
+// Hoja «Añadir alimento»: COMUNES (lista con buscador) · RECETAS (conjuntos) · NUEVO (añadir a la lista).
+
+import {
+    Theme, Sheet, Field, Segmented, PrimaryButton, GhostButton, IconButton, IconClose, IconChevron,
+    Label, Mono, Sans, DotValue, FadeIn,
+} from "@oxide-theme";
+
+export struct CatalogRow {
+    id: int,
+    name: string,
+    base: string,
+    kcal: string,
+}
+
+export struct SelectedItem {
+    id: int,
+    name: string,
+    unit: int,
+    symbol: string,
+    base: string,
+    kcal: float,
+    protein: float,
+    carbs: float,
+    fat: float,
+    portion: string,
+    kcal-text: string,
+    protein-text: string,
+    carbs-text: string,
+    fat-text: string,
+}
+
+export struct PortionInfo {
+    valid: bool,
+    kcal: string,
+    macros: string,
+}
+
+export struct RecipeRow {
+    id: int,
+    name: string,
+    summary: string,
+    kcal: string,
+}
+
+export struct RecipeLine {
+    catalog-id: int,
+    name: string,
+    amount: string,
+    quantity: string,
+    kcal: string,
+}
+
+export struct RecipeInfo {
+    id: int,
+    name: string,
+    lines: [RecipeLine],
+    kcal: string,
+    macros: string,
+}
+
+// Puente con Rust para la lista de alimentos y las recetas.
+export global Pantry {
+    in property <[CatalogRow]> catalog;
+    in property <SelectedItem> selected;
+    in property <[RecipeRow]> recipes;
+    in property <RecipeInfo> recipe;
+    in property <[RecipeLine]> draft-lines;
+    in property <string> draft-total;
+
+    // Lista
+    callback search(string);
+    callback select-item(int);
+    pure callback portion(SelectedItem, string) -> PortionInfo;
+    callback add-to-day(int, string, int) -> bool;
+    pure callback validate-item(string, int, string, string, string, string, string) -> bool;
+    callback save-item(int, string, int, string, string, string, string, string) -> int;
+    callback remove-item(int);
+    // Recetas
+    callback open-recipe(int);
+    callback add-recipe(int, int) -> bool;
+    callback draft-start(int);
+    callback draft-add(int, string) -> bool;
+    callback draft-set(int, string) -> bool;
+    callback draft-remove(int);
+    callback draft-save(int, string) -> int;
+    callback delete-recipe(int);
+}
+
+// ───────────────────────── Piezas ─────────────────────────
+
+component ListRow inherits Rectangle {
+    in property <string> title;
+    in property <string> subtitle;
+    in property <string> trailing;
+    in property <bool> last;
+    callback clicked();
+
+    border-radius: 14px;
+    background: touch.pressed ? Theme.nav-active : transparent;
+    animate background { duration: 120ms; }
+    accessible-role: button;
+    accessible-label: root.title + ", " + root.trailing;
+    accessible-action-default => {
+        root.clicked();
+    }
+
+    touch := TouchArea {
+        clicked => {
+            root.clicked();
+        }
+    }
+
+    VerticalLayout {
+        HorizontalLayout {
+            padding-left: 6px;
+            padding-right: 4px;
+            padding-top: 11px;
+            padding-bottom: 11px;
+            spacing: 10px;
+            VerticalLayout {
+                horizontal-stretch: 1;
+                spacing: 3px;
+                alignment: center;
+                Sans {
+                    text: root.title;
+                    overflow: elide;
+                }
+                if root.subtitle != "": Label {
+                    text: root.subtitle;
+                    font-size: 10px;
+                    letter-spacing: 0;
+                    overflow: elide;
+                }
+            }
+            Mono {
+                text: root.trailing;
+                font-size: 13px;
+            }
+            VerticalLayout {
+                alignment: center;
+                IconChevron { }
+            }
+        }
+        if !root.last: Rectangle {
+            height: 1px;
+            background: Theme.divider;
+        }
+    }
+}
+
+// Buscador + lista de alimentos.
+component CatalogPicker inherits VerticalLayout {
+    // La lista está arriba del todo: arrastrar hacia abajo cierra la hoja en vez de hacer scroll.
+    out property <bool> at-top: scroll.content-y >= -1px;
+    in property <string> back-text;
+    in-out property <string> query;
+    callback picked(int);
+    callback create(string);
+    callback back();
+    callback back-pressed();
+
+    spacing: 10px;
+
+    Field {
+        label: "BUSCAR";
+        placeholder: "leche, arroz, pollo…";
+        text <=> root.query;
+        input-hints: { capitalization: CapitalizationMode.none, auto-correct: false, auto-complete: false };
+        edited => {
+            Pantry.search(self.text);
+        }
+        accepted => {
+            if Pantry.catalog.length > 0 {
+                root.picked(Pantry.catalog[0].id);
+            }
+        }
+        back-pressed => {
+            root.back-pressed();
+        }
+    }
+
+    // Contenedor elástico: el Flickable no cede altura por sí mismo si su contenido es corto.
+    Rectangle {
+        vertical-stretch: 1;
+        min-height: 96px;
+        scroll := Flickable {
+            width: 100%;
+            height: 100%;
+            content-height: list.preferred-height;
+            list := VerticalLayout {
+                x: 0;
+                y: 0;
+                width: scroll.width;
+                for item[i] in Pantry.catalog: ListRow {
+                    title: item.name;
+                    subtitle: item.base;
+                    trailing: item.kcal;
+                    last: i == Pantry.catalog.length - 1;
+                    clicked => {
+                        root.picked(item.id);
+                    }
+                }
+                if Pantry.catalog.length == 0: VerticalLayout {
+                    padding-top: 24px;
+                    spacing: 14px;
+                    Sans {
+                        text: "Sin resultados";
+                        color: Theme.muted;
+                        horizontal-alignment: center;
+                    }
+                    HorizontalLayout {
+                        alignment: center;
+                        GhostButton {
+                            text: root.query == "" ? "CREAR ALIMENTO" : "CREAR «" + root.query + "»";
+                            clicked => {
+                                root.create(root.query);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    if root.back-text != "": GhostButton {
+        text: root.back-text;
+        clicked => {
+            root.back();
+        }
+    }
+}
+
+// Cantidad de un alimento: calcula kcal y macros al vuelo.
+component QuantityPanel inherits VerticalLayout {
+    in property <bool> for-recipe;
+    in property <bool> updating;
+    in property <string> initial;
+    in-out property <int> meal;
+    callback confirm(string);
+    callback back();
+    callback edit-item();
+    callback back-pressed();
+
+    // Vacío = ración sugerida (se muestra como placeholder): basta con escribir para cambiarla.
+    property <string> quantity: qty.text == "" ? root.initial : qty.text;
+    property <PortionInfo> info: Pantry.portion(Pantry.selected, root.quantity);
+
+    spacing: 12px;
+
+    init => {
+        qty.focus();
+    }
+
+    Rectangle {
+        vertical-stretch: 0;
+        background: Theme.chip;
+        border-radius: Theme.radius-field;
+        HorizontalLayout {
+            padding: 14px;
+            padding-left: 16px;
+            spacing: 10px;
+            VerticalLayout {
+                horizontal-stretch: 1;
+                spacing: 4px;
+                alignment: center;
+                Sans {
+                    text: Pantry.selected.name;
+                    font-size: 17px;
+                    wrap: word-wrap;
+                }
+                Label {
+                    text: Pantry.selected.base;
+                    font-size: 10px;
+                    letter-spacing: 0;
+                    wrap: word-wrap;
+                }
+            }
+            if !root.for-recipe: VerticalLayout {
+                alignment: center;
+                GhostButton {
+                    text: "EDITAR";
+                    clicked => {
+                        root.edit-item();
+                    }
+                }
+            }
+        }
+    }
+
+    HorizontalLayout {
+        spacing: Theme.gap;
+        qty := Field {
+            horizontal-stretch: 1;
+            label: "CANTIDAD";
+            placeholder: root.initial;
+            placeholder-color: Theme.muted;
+            suffix: Pantry.selected.symbol;
+            input-type: InputType.decimal;
+            accepted => {
+                if root.info.valid {
+                    root.confirm(root.quantity);
+                }
+            }
+            back-pressed => {
+                root.back-pressed();
+            }
+        }
+        Rectangle {
+            width: 128px;
+            background: Theme.chip;
+            border-radius: Theme.radius-field;
+            VerticalLayout {
+                padding-left: 16px;
+                padding-right: 10px;
+                spacing: 2px;
+                alignment: center;
+                Label {
+                    text: "ENERGÍA";
+                    font-size: 10px;
+                }
+                DotValue {
+                    value: root.info.valid ? root.info.kcal : "—";
+                    unit: "kcal";
+                    size: 26px;
+                }
+            }
+        }
+    }
+
+    Label {
+        text: root.info.valid ? root.info.macros : "ESCRIBE UNA CANTIDAD";
+        font-size: 10px;
+        letter-spacing: 0;
+    }
+
+    if !root.for-recipe: Segmented {
+        label: "Comida";
+        options: ["DESAYUNO", "COMIDA", "CENA", "SNACK"];
+        current <=> root.meal;
+    }
+
+    HorizontalLayout {
+        spacing: Theme.gap;
+        GhostButton {
+            text: "VOLVER";
+            clicked => {
+                root.back();
+            }
+        }
+        PrimaryButton {
+            horizontal-stretch: 1;
+            text: !root.for-recipe ? "AÑADIR" : root.updating ? "ACTUALIZAR" : "AÑADIR A LA RECETA";
+            enabled: root.info.valid;
+            clicked => {
+                root.confirm(root.quantity);
+            }
+        }
+    }
+}
+
+// Lista de recetas guardadas.
+component RecipeList inherits VerticalLayout {
+    // La lista está arriba del todo: arrastrar hacia abajo cierra la hoja en vez de hacer scroll.
+    out property <bool> at-top: scroll.content-y >= -1px;
+    callback open(int);
+    callback create();
+
+    spacing: 10px;
+
+    // Contenedor elástico: el Flickable no cede altura por sí mismo si su contenido es corto.
+    Rectangle {
+        vertical-stretch: 1;
+        min-height: 96px;
+        scroll := Flickable {
+            width: 100%;
+            height: 100%;
+            content-height: list.preferred-height;
+            list := VerticalLayout {
+                x: 0;
+                y: 0;
+                width: scroll.width;
+                if Pantry.recipes.length == 0: VerticalLayout {
+                    padding-top: 28px;
+                    padding-bottom: 28px;
+                    padding-left: 12px;
+                    padding-right: 12px;
+                    spacing: 10px;
+                    Sans {
+                        text: "Aún no tienes recetas";
+                        horizontal-alignment: center;
+                    }
+                    Label {
+                        text: "Guarda lo que comes a menudo, como tu desayuno, y añádelo de una vez.";
+                        font-size: 11px;
+                        letter-spacing: 0;
+                        wrap: word-wrap;
+                        horizontal-alignment: center;
+                    }
+                }
+                for r[i] in Pantry.recipes: ListRow {
+                    title: r.name;
+                    subtitle: r.summary;
+                    trailing: r.kcal;
+                    last: i == Pantry.recipes.length - 1;
+                    clicked => {
+                        root.open(r.id);
+                    }
+                }
+            }
+        }
+    }
+
+    PrimaryButton {
+        text: "NUEVA RECETA";
+        clicked => {
+            root.create();
+        }
+    }
+}
+
+// Detalle de una receta: lo que contiene, total y «Añadir todo».
+component RecipePanel inherits VerticalLayout {
+    in-out property <int> meal;
+    callback add-all();
+    callback edit();
+    callback back();
+
+    spacing: 12px;
+
+    Rectangle {
+        vertical-stretch: 0;
+        background: Theme.chip;
+        border-radius: Theme.radius-field;
+        VerticalLayout {
+            padding: 16px;
+            spacing: 10px;
+            Sans {
+                text: Pantry.recipe.name;
+                font-size: 17px;
+                wrap: word-wrap;
+            }
+            for line in Pantry.recipe.lines: HorizontalLayout {
+                spacing: 8px;
+                Sans {
+                    horizontal-stretch: 1;
+                    text: line.name;
+                    font-size: 14px;
+                    overflow: elide;
+                }
+                Label {
+                    text: line.amount;
+                    font-size: 10px;
+                    letter-spacing: 0;
+                }
+                Mono {
+                    min-width: 44px;
+                    text: line.kcal;
+                    font-size: 13px;
+                    horizontal-alignment: right;
+                }
+            }
+        }
+    }
+
+    HorizontalLayout {
+        spacing: 12px;
+        DotValue {
+            value: Pantry.recipe.kcal;
+            unit: "kcal";
+            size: 34px;
+        }
+        Label {
+            horizontal-stretch: 1;
+            text: Pantry.recipe.macros;
+            font-size: 10px;
+            letter-spacing: 0;
+            horizontal-alignment: right;
+            wrap: word-wrap;
+        }
+    }
+
+    Segmented {
+        label: "Comida";
+        options: ["DESAYUNO", "COMIDA", "CENA", "SNACK"];
+        current <=> root.meal;
+    }
+
+    HorizontalLayout {
+        spacing: Theme.gap;
+        GhostButton {
+            text: "VOLVER";
+            clicked => {
+                root.back();
+            }
+        }
+        GhostButton {
+            text: "EDITAR";
+            clicked => {
+                root.edit();
+            }
+        }
+        PrimaryButton {
+            horizontal-stretch: 1;
+            text: "AÑADIR TODO";
+            enabled: Pantry.recipe.lines.length > 0;
+            clicked => {
+                root.add-all();
+            }
+        }
+    }
+}
+
+// Editor de receta: nombre y alimentos con su cantidad.
+component RecipeEditor inherits VerticalLayout {
+    // La lista está arriba del todo: arrastrar hacia abajo cierra la hoja en vez de hacer scroll.
+    out property <bool> at-top: scroll.content-y >= -1px;
+    in property <bool> existing;
+    in-out property <string> name;
+    callback add-item();
+    callback edit-line(int);
+    callback save();
+    callback cancel();
+    callback delete();
+    callback back-pressed();
+
+    property <bool> confirm-delete;
+
+    spacing: 12px;
+
+    Field {
+        label: "NOMBRE DE LA RECETA";
+        placeholder: "Desayuno habitual";
+        text <=> root.name;
+        input-hints: { capitalization: CapitalizationMode.sentences, auto-correct: true, auto-complete: true };
+        back-pressed => {
+            root.back-pressed();
+        }
+    }
+
+    // Contenedor elástico: el Flickable no cede altura por sí mismo si su contenido es corto.
+    Rectangle {
+        vertical-stretch: 1;
+        min-height: 72px;
+        scroll := Flickable {
+            width: 100%;
+            height: 100%;
+            content-height: list.preferred-height;
+            list := VerticalLayout {
+                x: 0;
+                y: 0;
+                width: scroll.width;
+                if Pantry.draft-lines.length == 0: Label {
+                    height: 64px;
+                    text: "AÑADE LOS ALIMENTOS QUE LA FORMAN";
+                    font-size: 10px;
+                    horizontal-alignment: center;
+                }
+                for line[i] in Pantry.draft-lines: HorizontalLayout {
+                    spacing: 4px;
+                    Rectangle {
+                        horizontal-stretch: 1;
+                        border-radius: 12px;
+                        background: line-touch.pressed ? Theme.nav-active : transparent;
+                        accessible-role: button;
+                        accessible-label: line.name + ", " + line.amount + ". Cambiar cantidad";
+                        accessible-action-default => {
+                            root.edit-line(i);
+                        }
+                        line-touch := TouchArea {
+                            clicked => {
+                                root.edit-line(i);
+                            }
+                        }
+                        HorizontalLayout {
+                            padding: 8px;
+                            padding-left: 6px;
+                            spacing: 8px;
+                            VerticalLayout {
+                                horizontal-stretch: 1;
+                                spacing: 2px;
+                                alignment: center;
+                                Sans {
+                                    text: line.name;
+                                    font-size: 14px;
+                                    overflow: elide;
+                                }
+                                Label {
+                                    text: line.amount;
+                                    font-size: 10px;
+                                    letter-spacing: 0;
+                                }
+                            }
+                            Mono {
+                                text: line.kcal;
+                                font-size: 13px;
+                            }
+                        }
+                    }
+                    VerticalLayout {
+                        alignment: center;
+                        IconButton {
+                            label: "Quitar " + line.name;
+                            clicked => {
+                                Pantry.draft-remove(i);
+                            }
+                            IconClose {
+                                size: 16px;
+                                color: Theme.muted;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    GhostButton {
+        text: "+ AÑADIR ALIMENTO";
+        clicked => {
+            root.add-item();
+        }
+    }
+
+    HorizontalLayout {
+        Label {
+            horizontal-stretch: 1;
+            text: "TOTAL";
+            font-size: 10px;
+        }
+        Mono {
+            text: Pantry.draft-total;
+            font-size: 13px;
+        }
+    }
+
+    HorizontalLayout {
+        spacing: Theme.gap;
+        if root.existing: GhostButton {
+            text: root.confirm-delete ? "¿SEGURO?" : "BORRAR";
+            text-color: Theme.accent;
+            clicked => {
+                if root.confirm-delete {
+                    root.delete();
+                } else {
+                    root.confirm-delete = true;
+                }
+            }
+        }
+        GhostButton {
+            text: "CANCELAR";
+            clicked => {
+                root.cancel();
+            }
+        }
+        PrimaryButton {
+            horizontal-stretch: 1;
+            text: "GUARDAR";
+            enabled: root.name != "" && Pantry.draft-lines.length > 0;
+            clicked => {
+                root.save();
+            }
+        }
+    }
+}
+
+// Formulario para añadir un alimento a la lista (o editar uno existente).
+component ItemForm inherits VerticalLayout {
+    in property <bool> editing;
+    in property <string> prefill-name;
+    // Al llegar deslizando no se abre el teclado: interrumpiría el gesto.
+    in property <bool> autofocus: true;
+    callback saved(int);
+    callback cancel();
+    callback removed();
+    callback back-pressed();
+
+    property <int> unit: 0;
+    property <bool> confirm-remove;
+    property <string> base: root.unit == 0 ? "100 G" : root.unit == 1 ? "100 ML" : "UNIDAD";
+    property <string> symbol: root.unit == 0 ? "g" : root.unit == 1 ? "ml" : "ud";
+    property <bool> valid: Pantry.validate-item(name.text, root.unit, kcal.text, protein.text, carbs.text, fat.text, portion.text);
+
+    function save() {
+        root.after-save(Pantry.save-item(root.editing ? Pantry.selected.id : -1, name.text, root.unit, kcal.text, protein.text, carbs.text, fat.text, portion.text));
+    }
+    function after-save(id: int) {
+        if id >= 0 {
+            root.saved(id);
+        }
+    }
+
+    init => {
+        if root.editing {
+            name.text = Pantry.selected.name;
+            root.unit = Pantry.selected.unit;
+            kcal.text = Pantry.selected.kcal-text;
+            protein.text = Pantry.selected.protein-text;
+            carbs.text = Pantry.selected.carbs-text;
+            fat.text = Pantry.selected.fat-text;
+            portion.text = Pantry.selected.portion;
+        } else {
+            name.text = root.prefill-name;
+            portion.text = "100";
+            if root.autofocus {
+                name.focus();
+            }
+        }
+    }
+
+    spacing: 12px;
+
+    name := Field {
+        label: "NOMBRE";
+        placeholder: "Barrita proteica";
+        input-hints: { capitalization: CapitalizationMode.sentences, auto-correct: true, auto-complete: true };
+        accepted => {
+            kcal.focus();
+        }
+        back-pressed => {
+            root.back-pressed();
+        }
+    }
+
+    Segmented {
+        label: "Valores por";
+        options: ["POR 100 G", "POR 100 ML", "POR UNIDAD"];
+        current <=> root.unit;
+        changed(i) => {
+            if i == 2 && portion.text == "100" {
+                portion.text = "1";
+            } else if i != 2 && portion.text == "1" {
+                portion.text = "100";
+            }
+        }
+    }
+
+    HorizontalLayout {
+        spacing: Theme.gap;
+        kcal := Field {
+            horizontal-stretch: 1;
+            label: "KCAL / " + root.base;
+            placeholder: "0";
+            suffix: "kcal";
+            input-type: InputType.decimal;
+            accepted => {
+                portion.focus();
+            }
+            back-pressed => {
+                root.back-pressed();
+            }
+        }
+        portion := Field {
+            width: 124px;
+            label: "RACIÓN";
+            suffix: root.symbol;
+            input-type: InputType.decimal;
+            accepted => {
+                protein.focus();
+            }
+            back-pressed => {
+                root.back-pressed();
+            }
+        }
+    }
+
+    HorizontalLayout {
+        spacing: Theme.gap;
+        protein := Field {
+            label: "PROT";
+            placeholder: "0";
+            suffix: "g";
+            input-type: InputType.decimal;
+            accepted => {
+                carbs.focus();
+            }
+            back-pressed => {
+                root.back-pressed();
+            }
+        }
+        carbs := Field {
+            label: "CARB";
+            placeholder: "0";
+            suffix: "g";
+            input-type: InputType.decimal;
+            accepted => {
+                fat.focus();
+            }
+            back-pressed => {
+                root.back-pressed();
+            }
+        }
+        fat := Field {
+            label: "GRASA";
+            placeholder: "0";
+            suffix: "g";
+            input-type: InputType.decimal;
+            accepted => {
+                if root.valid {
+                    root.save();
+                }
+            }
+            back-pressed => {
+                root.back-pressed();
+            }
+        }
+    }
+
+    HorizontalLayout {
+        spacing: Theme.gap;
+        if root.editing: GhostButton {
+            text: root.confirm-remove ? "¿SEGURO?" : "QUITAR";
+            text-color: Theme.accent;
+            clicked => {
+                if root.confirm-remove {
+                    root.removed();
+                } else {
+                    root.confirm-remove = true;
+                }
+            }
+        }
+        if root.editing: GhostButton {
+            text: "CANCELAR";
+            clicked => {
+                root.cancel();
+            }
+        }
+        PrimaryButton {
+            horizontal-stretch: 1;
+            text: root.editing ? "GUARDAR" : "GUARDAR EN LA LISTA";
+            enabled: root.valid;
+            clicked => {
+                root.save();
+            }
+        }
+    }
+}
+
+// ───────────────────────── Hoja ─────────────────────────
+
+// Vistas: 0 lista · 1 cantidad (al día) · 2 recetas · 3 receta · 4 editor de receta
+//         5 elegir alimento para la receta · 6 cantidad (a la receta) · 7 formulario de alimento
+export component AddFoodSheet inherits Sheet {
+    title: "AÑADIR ALIMENTO";
+    in-out property <int> meal;
+    // Se ha añadido algo al día: cerrar la hoja.
+    callback done();
+    // La vista ha cambiado: devolver el foco al ámbito de teclas de la ventana.
+    callback refocus();
+
+    property <int> view: 0;
+    property <int> tab: 0;
+    property <string> query;
+    property <string> initial-qty;
+    property <int> editing-line: -1;
+    property <int> editing-recipe: -1;
+    property <string> recipe-name;
+    property <bool> editing-item;
+    property <string> prefill-name;
+    // De dónde se abrió el formulario de alimento: 0 lista, 1 receta.
+    property <int> form-context;
+
+    fill: root.view == 0 || root.view == 2 || root.view == 4 || root.view == 5;
+
+    // Si la vista tiene lista, solo se cierra arrastrando cuando está arriba del todo.
+    property <bool> list-at-top: true;
+    content-at-top: !root.fill || root.list-at-top;
+
+    // ── Deslizar entre secciones ──
+    // Desactivado mientras se edita una receta o un alimento para no perder lo escrito.
+    property <bool> swipe-enabled: root.view <= 3 || (root.view == 7 && !root.editing-item);
+    // Desplazamiento horizontal del contenido y destino de la animación.
+    property <length> offset;
+    property <length> target;
+    // 0 quieto o arrastrando · 1 saliendo · 2 entrando · 3 volviendo a su sitio
+    property <int> phase;
+    property <int> pending-tab;
+
+    function show-tab(i: int) {
+        if i == 0 {
+            root.go(0);
+        } else if i == 1 {
+            root.go(2);
+        } else {
+            root.new-item("", 0);
+        }
+    }
+
+    // En la primera y la última sección el arrastre ofrece resistencia.
+    function rubber(dx: length) -> length {
+        return (dx < 0 && root.tab >= 2) || (dx > 0 && root.tab <= 0) ? dx * 0.25 : dx;
+    }
+
+    function go(v: int) {
+        root.refocus();
+        root.view = v;
+        root.tab = v <= 1 ? 0 : v <= 6 ? 1 : 2;
+    }
+
+    public function reset(meal-index: int) {
+        root.meal = meal-index;
+        root.query = "";
+        Pantry.search("");
+        root.editing-line = -1;
+        root.editing-recipe = -1;
+        root.editing-item = false;
+        root.form-context = 0;
+        root.go(0);
+    }
+
+    // Abre la sección NUEVO con un nombre ya escrito (algo dictado que no estaba en la lista).
+    public function reset-new(meal-index: int, name: string) {
+        root.reset(meal-index);
+        root.new-item(name, 0);
+    }
+
+    // Atrás de Android: retrocede dentro de la hoja; en las vistas raíz la cierra.
+    public function back() {
+        if root.view == 1 {
+            root.go(0);
+        } else if root.view == 3 {
+            root.go(2);
+        } else if root.view == 4 {
+            root.cancel-recipe();
+        } else if root.view == 5 {
+            root.go(4);
+        } else if root.view == 6 {
+            root.go(root.editing-line >= 0 ? 4 : 5);
+        } else if root.view == 7 {
+            root.cancel-item();
+        } else {
+            root.dismiss();
+        }
+    }
+
+    function pick-for-day(id: int) {
+        Pantry.select-item(id);
+        root.initial-qty = Pantry.selected.portion;
+        root.go(1);
+    }
+
+    function pick-for-recipe(id: int) {
+        Pantry.select-item(id);
+        root.editing-line = -1;
+        root.initial-qty = Pantry.selected.portion;
+        root.go(6);
+    }
+
+    function new-item(name: string, context: int) {
+        root.editing-item = false;
+        root.prefill-name = name;
+        root.form-context = context;
+        root.go(7);
+    }
+
+    function item-saved(id: int) {
+        Pantry.select-item(id);
+        root.initial-qty = Pantry.selected.portion;
+        if root.form-context == 1 && !root.editing-item {
+            root.editing-line = -1;
+            root.go(6);
+        } else {
+            root.go(1);
+        }
+    }
+
+    function cancel-item() {
+        if root.editing-item {
+            root.go(1);
+        } else {
+            root.go(root.form-context == 1 ? 5 : 0);
+        }
+    }
+
+    function recipe-saved(id: int) {
+        if id >= 0 {
+            root.editing-recipe = -1;
+            Pantry.open-recipe(id);
+            root.go(3);
+        }
+    }
+
+    function cancel-recipe() {
+        if root.editing-recipe >= 0 {
+            Pantry.open-recipe(root.editing-recipe);
+            root.go(3);
+        } else {
+            root.go(2);
+        }
+    }
+
+    Segmented {
+        label: "Sección";
+        options: ["COMUNES", "RECETAS", "NUEVO"];
+        current <=> root.tab;
+        drag-progress: root.phase == 2 ? 0 : -root.offset / max(1px, swiper.width);
+        changed(i) => {
+            root.show-tab(i);
+        }
+    }
+
+    Timer {
+        interval: 16ms;
+        running: root.phase != 0;
+        triggered => {
+            if abs(root.target - root.offset) < 1px {
+                root.offset = root.target;
+                if root.phase == 1 {
+                    // La sección actual ya salió: cambia y entra la nueva por el lado contrario.
+                    root.offset = -root.target * 0.4;
+                    root.target = 0;
+                    root.phase = 2;
+                    root.show-tab(root.pending-tab);
+                } else {
+                    root.phase = 0;
+                }
+            } else {
+                root.offset += (root.target - root.offset) * (root.phase == 1 ? 0.38 : 0.2);
+            }
+        }
+    }
+
+    swiper := SwipeGestureHandler {
+        vertical-stretch: root.fill ? 1 : 0;
+        min-height: views.min-height;
+        preferred-height: views.preferred-height;
+        enabled: root.open && root.swipe-enabled && root.phase == 0;
+        handle-swipe-left: true;
+        handle-swipe-right: true;
+        moved => {
+            if self.swiping {
+                root.offset = root.rubber(self.current-position.x - self.pressed-position.x);
+            }
+        }
+        swiped => {
+            if root.offset < -self.width * 0.2 && root.tab < 2 {
+                root.pending-tab = root.tab + 1;
+                root.target = -self.width;
+                root.phase = 1;
+            } else if root.offset > self.width * 0.2 && root.tab > 0 {
+                root.pending-tab = root.tab - 1;
+                root.target = self.width;
+                root.phase = 1;
+            } else {
+                root.target = 0;
+                root.phase = 3;
+            }
+        }
+        cancelled => {
+            root.target = 0;
+            root.phase = 3;
+        }
+
+        Rectangle {
+            x: root.offset;
+            y: 0;
+            width: parent.width;
+            height: parent.height;
+
+            views := VerticalLayout {
+
+                if root.view == 0: FadeIn {
+                    vertical-stretch: 1;
+                    CatalogPicker {
+                        init => {
+                            root.list-at-top = true;
+                        }
+                        changed at-top => {
+                            root.list-at-top = self.at-top;
+                        }
+                        query <=> root.query;
+                        picked(id) => {
+                            root.pick-for-day(id);
+                        }
+                        create(q) => {
+                            root.new-item(q, 0);
+                        }
+                        back-pressed => {
+                            root.back();
+                        }
+                    }
+                }
+
+                if root.view == 1: FadeIn {
+                    vertical-stretch: 0;
+                    QuantityPanel {
+                        initial: root.initial-qty;
+                        meal <=> root.meal;
+                        confirm(q) => {
+                            if Pantry.add-to-day(Pantry.selected.id, q, root.meal) {
+                                root.done();
+                            }
+                        }
+                        back => {
+                            root.go(0);
+                        }
+                        edit-item => {
+                            root.editing-item = true;
+                            root.form-context = 0;
+                            root.go(7);
+                        }
+                        back-pressed => {
+                            root.back();
+                        }
+                    }
+                }
+
+                if root.view == 2: FadeIn {
+                    vertical-stretch: 1;
+                    RecipeList {
+                        init => {
+                            root.list-at-top = true;
+                        }
+                        changed at-top => {
+                            root.list-at-top = self.at-top;
+                        }
+                        open(id) => {
+                            Pantry.open-recipe(id);
+                            root.go(3);
+                        }
+                        create => {
+                            Pantry.draft-start(-1);
+                            root.editing-recipe = -1;
+                            root.recipe-name = "";
+                            root.go(4);
+                        }
+                    }
+                }
+
+                if root.view == 3: FadeIn {
+                    vertical-stretch: 0;
+                    RecipePanel {
+                        meal <=> root.meal;
+                        add-all => {
+                            if Pantry.add-recipe(Pantry.recipe.id, root.meal) {
+                                root.done();
+                            }
+                        }
+                        edit => {
+                            Pantry.draft-start(Pantry.recipe.id);
+                            root.editing-recipe = Pantry.recipe.id;
+                            root.recipe-name = Pantry.recipe.name;
+                            root.go(4);
+                        }
+                        back => {
+                            root.go(2);
+                        }
+                    }
+                }
+
+                if root.view == 4: FadeIn {
+                    vertical-stretch: 1;
+                    RecipeEditor {
+                        init => {
+                            root.list-at-top = true;
+                        }
+                        changed at-top => {
+                            root.list-at-top = self.at-top;
+                        }
+                        existing: root.editing-recipe >= 0;
+                        name <=> root.recipe-name;
+                        add-item => {
+                            root.query = "";
+                            Pantry.search("");
+                            root.go(5);
+                        }
+                        edit-line(i) => {
+                            Pantry.select-item(Pantry.draft-lines[i].catalog-id);
+                            root.editing-line = i;
+                            root.initial-qty = Pantry.draft-lines[i].quantity;
+                            root.go(6);
+                        }
+                        save => {
+                            root.recipe-saved(Pantry.draft-save(root.editing-recipe, root.recipe-name));
+                        }
+                        cancel => {
+                            root.cancel-recipe();
+                        }
+                        delete => {
+                            Pantry.delete-recipe(root.editing-recipe);
+                            root.editing-recipe = -1;
+                            root.go(2);
+                        }
+                        back-pressed => {
+                            root.back();
+                        }
+                    }
+                }
+
+                if root.view == 5: FadeIn {
+                    vertical-stretch: 1;
+                    CatalogPicker {
+                        init => {
+                            root.list-at-top = true;
+                        }
+                        changed at-top => {
+                            root.list-at-top = self.at-top;
+                        }
+                        query <=> root.query;
+                        back-text: "VOLVER A LA RECETA";
+                        picked(id) => {
+                            root.pick-for-recipe(id);
+                        }
+                        create(q) => {
+                            root.new-item(q, 1);
+                        }
+                        back => {
+                            root.go(4);
+                        }
+                        back-pressed => {
+                            root.back();
+                        }
+                    }
+                }
+
+                if root.view == 6: FadeIn {
+                    vertical-stretch: 0;
+                    QuantityPanel {
+                        for-recipe: true;
+                        updating: root.editing-line >= 0;
+                        initial: root.initial-qty;
+                        confirm(q) => {
+                            if root.editing-line >= 0 {
+                                if Pantry.draft-set(root.editing-line, q) {
+                                    root.go(4);
+                                }
+                            } else if Pantry.draft-add(Pantry.selected.id, q) {
+                                root.go(4);
+                            }
+                        }
+                        back => {
+                            root.back();
+                        }
+                        back-pressed => {
+                            root.back();
+                        }
+                    }
+                }
+
+                if root.view == 7: FadeIn {
+                    vertical-stretch: 0;
+                    ItemForm {
+                        editing: root.editing-item;
+                        prefill-name: root.prefill-name;
+                        autofocus: root.phase == 0;
+                        saved(id) => {
+                            root.item-saved(id);
+                        }
+                        cancel => {
+                            root.cancel-item();
+                        }
+                        removed => {
+                            Pantry.remove-item(Pantry.selected.id);
+                            root.editing-item = false;
+                            root.go(0);
+                        }
+                        back-pressed => {
+                            root.back();
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

@@ -1,0 +1,12 @@
+# La ruta del proyecto contiene "::" y ":" es el separador de LD_LIBRARY_PATH/CLASSPATH,
+# así que los artefactos se generan fuera del árbol del proyecto.
+[build]
+target-dir = "/home/karlos/.cache/oxide-target"
+
+[env]
+ANDROID_HOME = "/home/karlos/Android/Sdk"
+ANDROID_NDK_ROOT = "/home/karlos/Android/Sdk/ndk/28.2.13676358"
+JAVA_HOME = "/opt/android-studio/jbr"
+# whisper.cpp para los móviles (Nothing Phone 2a: Cortex-A715/A510; Phone 3: X4/A720/A520):
+# producto escalar int8, fp16 e i8mm aceleran el modelo de voz. Solo afecta a compilaciones ARM.
+GGML_CPU_ARM_ARCH = "armv8.2-a+dotprod+fp16+i8mm"

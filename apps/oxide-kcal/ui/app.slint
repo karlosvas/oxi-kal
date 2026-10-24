@@ -1,0 +1,419 @@
+// oxide::kcal — ventana principal: cabecera, Hoy / Peso, navegación flotante y hojas.
+
+import { Theme, Patina, Motion, FloatingNav, Toast, IconButton, IconSliders } from "@oxide-theme";
+import { HoyPage, MacroInfo, FoodRow } from "hoy.slint";
+import { PesoPage, WeightRow, StatInfo } from "peso.slint";
+import { GoalsSheet } from "sheets.slint";
+import { Voice, VoiceCard, MicButton, VoiceStrip, VoiceReview } from "voice.slint";
+import {
+    AddFoodSheet, Pantry, CatalogRow, SelectedItem, PortionInfo, RecipeRow, RecipeLine, RecipeInfo,
+} from "add_food.slint";
+
+export { MacroInfo, FoodRow, WeightRow, StatInfo }
+export { Patina, Motion, Pantry, CatalogRow, SelectedItem, PortionInfo, RecipeRow, RecipeLine, RecipeInfo }
+export { Voice, VoiceCard }
+
+export component AppWindow inherits Window {
+    title: "oxide::kcal";
+    background: Theme.bg;
+    default-font-family: Theme.font-sans;
+    preferred-width: 412px;
+    preferred-height: 915px;
+
+    // ── General ──
+    in property <string> date-label;
+    in-out property <int> tab: 0;
+
+    // ── Hoy ──
+    in property <int> kcal-value;
+    in property <string> goal-text;
+    in property <string> remaining-text;
+    in property <float> ring-progress;
+    in property <int> ring-percent;
+    in property <string> ring-description;
+    in property <[MacroInfo]> macros;
+    in property <[FoodRow]> foods;
+    in property <string> goal-kcal;
+    in property <string> goal-protein;
+    in property <string> goal-carbs;
+    in property <string> goal-fat;
+    callback delete-food(int);
+    callback suggested-meal() -> int;
+    pure callback validate-goals(string, string, string, string) -> bool;
+    callback save-goals(string, string, string, string) -> bool;
+
+    // ── Aviso ──
+    in property <bool> toast-shown;
+    in property <string> toast-text;
+    in property <string> toast-action;
+    callback toast-action-clicked();
+
+    // ── Peso ──
+    in property <bool> weight-has-data;
+    in property <string> weight-current;
+    in property <string> weight-delta;
+    in property <string> draft;
+    in property <bool> draft-saved;
+    callback weight-step(int);
+    callback weight-save();
+    in-out property <int> range-index: 0;
+    callback range-changed(int);
+    in property <bool> chart-ready;
+    in property <string> chart-commands;
+    in property <float> chart-end-x;
+    in property <float> chart-end-y;
+    in property <string> chart-max;
+    in property <string> chart-mid;
+    in property <string> chart-min;
+    in property <string> chart-start;
+    in property <string> chart-end;
+    in property <string> chart-empty;
+    in property <string> chart-description;
+    in property <[StatInfo]> stats;
+    in property <[WeightRow]> history;
+
+    // ── Estado de capas ──
+    property <bool> add-open;
+    property <bool> goals-open;
+
+    property <length> inset-top: max(self.safe-area-insets.top, 0px);
+    property <length> inset-bottom: max(self.safe-area-insets.bottom, 0px);
+    // En horizontal el agujero de la cámara y la barra del sistema pueden quedar a los lados.
+    property <length> inset-left: max(self.safe-area-insets.left, 0px);
+    property <length> inset-right: max(self.safe-area-insets.right, 0px);
+    // Pantalla en horizontal: páginas a dos columnas y la barra como carril a la derecha.
+    property <bool> wide: self.width > self.height;
+    property <length> keyboard-height: self.virtual-keyboard-size.height > 0px
+        ? max(0px, self.height - self.virtual-keyboard-position.y)
+        : 0px;
+    property <length> nav-bottom: max(Theme.nav-bottom, root.inset-bottom + 8px);
+    property <length> header-height: 44px;
+    property <length> content-top: root.inset-top + 12px + root.header-height;
+    // Hueco inferior para que el último elemento no quede bajo la barra flotante.
+    property <length> bottom-space: root.wide ? root.inset-bottom + 20px : root.nav-bottom + Theme.nav-height + 24px;
+    // Zona de las páginas (en horizontal, sin el carril).
+    property <length> content-left: root.wide ? root.inset-left : 0px;
+    property <length> content-width: root.wide ? nav.x - Theme.nav-side - root.content-left : root.width;
+    // Ancho del aviso y de la confirmación de voz en horizontal.
+    property <length> panel-width: min(root.width - 2 * Theme.nav-side, 520px);
+
+    public function open-add() {
+        root.goals-open = false;
+        add-sheet.reset(root.suggested-meal());
+        root.add-open = true;
+    }
+    // Crear en la lista algo dictado que no estaba: sección NUEVO con el nombre escrito.
+    public function open-add-new(name: string, meal: int) {
+        root.goals-open = false;
+        add-sheet.reset-new(meal, name);
+        root.add-open = true;
+    }
+    public function close-add() {
+        root.add-open = false;
+        keys.focus();
+    }
+    public function open-goals() {
+        root.add-open = false;
+        goals-sheet.load(root.goal-kcal, root.goal-protein, root.goal-carbs, root.goal-fat);
+        root.goals-open = true;
+    }
+    public function close-goals() {
+        goals-sheet.blur();
+        root.goals-open = false;
+        keys.focus();
+    }
+
+    init => {
+        keys.focus();
+    }
+
+    keys := FocusScope {
+        width: 100%;
+        height: 100%;
+        key-pressed(event) => {
+            if event.text == Key.Back || event.text == Key.Escape {
+                if Voice.state == 3 {
+                    Voice.close();
+                    return accept;
+                }
+                if Voice.state == 1 {
+                    Voice.release(true);
+                    return accept;
+                }
+                if root.add-open {
+                    add-sheet.back();
+                    return accept;
+                }
+                if root.goals-open {
+                    root.close-goals();
+                    return accept;
+                }
+                if root.tab != 0 {
+                    root.tab = 0;
+                    return accept;
+                }
+            }
+            return reject;
+        }
+
+        // ── Páginas ──
+        hoy := HoyPage {
+            x: root.content-left + (root.tab == 0 ? 0 : -40px);
+            y: root.content-top;
+            width: root.content-width;
+            wide: root.wide;
+            height: root.height - self.y;
+            opacity: root.tab == 0 ? 1 : 0;
+            visible: self.opacity > 0.01;
+            animate x { duration: 420ms; easing: cubic-bezier(0.22, 1, 0.36, 1); }
+            animate opacity { duration: 260ms; easing: ease-out-quad; }
+            bottom-space: root.bottom-space;
+            kcal-value: root.kcal-value;
+            goal-text: root.goal-text;
+            remaining-text: root.remaining-text;
+            ring-progress: root.ring-progress;
+            ring-percent: root.ring-percent;
+            ring-description: root.ring-description;
+            macros: root.macros;
+            foods: root.foods;
+            delete-food(id) => {
+                root.delete-food(id);
+            }
+            edit-goals => {
+                root.open-goals();
+            }
+        }
+
+        peso := PesoPage {
+            x: root.content-left + (root.tab == 1 ? 0 : 40px);
+            y: root.content-top;
+            width: root.content-width;
+            wide: root.wide;
+            height: root.height - self.y;
+            opacity: root.tab == 1 ? 1 : 0;
+            visible: self.opacity > 0.01;
+            animate x { duration: 420ms; easing: cubic-bezier(0.22, 1, 0.36, 1); }
+            animate opacity { duration: 260ms; easing: ease-out-quad; }
+            active: root.tab == 1;
+            bottom-space: root.bottom-space;
+            has-data: root.weight-has-data;
+            current: root.weight-current;
+            delta-text: root.weight-delta;
+            draft: root.draft;
+            draft-saved: root.draft-saved;
+            step(d) => {
+                root.weight-step(d);
+            }
+            save => {
+                root.weight-save();
+            }
+            range-index <=> root.range-index;
+            range-changed(i) => {
+                root.range-changed(i);
+            }
+            chart-ready: root.chart-ready;
+            chart-commands: root.chart-commands;
+            chart-end-x: root.chart-end-x;
+            chart-end-y: root.chart-end-y;
+            chart-max: root.chart-max;
+            chart-mid: root.chart-mid;
+            chart-min: root.chart-min;
+            chart-start: root.chart-start;
+            chart-end: root.chart-end;
+            chart-empty: root.chart-empty;
+            chart-description: root.chart-description;
+            stats: root.stats;
+            history: root.history;
+        }
+
+        // ── Cabecera (fondo negro para que el contenido pase por debajo) ──
+        Rectangle {
+            x: 0;
+            y: 0;
+            width: root.width;
+            height: root.content-top;
+            background: Theme.bg;
+
+            HorizontalLayout {
+                x: root.inset-left + 20px;
+                y: root.inset-top + 12px;
+                // El icono de 44 px lleva su propio margen interno: se extiende 12 px a la derecha.
+                width: root.width - root.inset-left - root.inset-right - 40px + 12px;
+                height: root.header-height;
+                spacing: 4px;
+
+                HorizontalLayout {
+                    horizontal-stretch: 1;
+                    alignment: start;
+                    Text {
+                        text: "oxide::";
+                        font-family: Theme.font-mono;
+                        font-size: 12px;
+                        color: Theme.muted;
+                        vertical-alignment: center;
+                    }
+                    Text {
+                        text: "kcal";
+                        font-family: Theme.font-mono;
+                        font-size: 12px;
+                        color: Theme.accent;
+                        vertical-alignment: center;
+                    }
+                }
+                Text {
+                    text: root.date-label;
+                    font-family: Theme.font-mono;
+                    font-size: 12px;
+                    color: Theme.muted;
+                    vertical-alignment: center;
+                }
+                IconButton {
+                    label: "Editar objetivos";
+                    clicked => {
+                        root.open-goals();
+                    }
+                    IconSliders {
+                        color: Theme.muted;
+                        size: 18px;
+                    }
+                }
+            }
+        }
+
+        // ── Aviso (deshacer) ──
+        Toast {
+            x: root.wide ? (root.width - root.panel-width) / 2 : Theme.nav-side;
+            width: root.wide ? root.panel-width : root.width - 2 * Theme.nav-side;
+            y: root.wide
+                ? root.height - root.inset-bottom - self.height - 16px
+                : root.height - root.nav-bottom - Theme.nav-height - self.height - 10px;
+            shown: root.toast-shown;
+            text: root.toast-text;
+            action: root.toast-action;
+            action-clicked => {
+                root.toast-action-clicked();
+            }
+        }
+
+        // ── Navegación flotante (con el micro a la izquierda del «+»; en horizontal, carril) ──
+        nav := FloatingNav {
+            vertical: root.wide;
+            width: root.wide ? Theme.nav-height : root.width - 2 * Theme.nav-side;
+            height: root.wide ? self.rail-length : Theme.nav-height;
+            x: root.wide ? root.width - root.inset-right - Theme.nav-side - self.width : Theme.nav-side;
+            y: root.wide
+                ? root.content-top + max(0px, (root.height - root.inset-bottom - root.content-top - self.height) / 2)
+                : root.height - root.nav-bottom - self.height;
+            tabs: ["HOY", "PESO"];
+            current <=> root.tab;
+            action-label: "Añadir alimento";
+            extra-width: Theme.fab-size;
+            busy: Voice.state == 1 || Voice.state == 2;
+            action => {
+                root.open-add();
+            }
+            mic := MicButton { }
+        }
+
+        // Grabando / transcribiendo: ocupa el sitio de las pestañas; en horizontal sale
+        // del micro hacia la izquierda.
+        strip := VoiceStrip {
+            x: root.wide ? nav.x - Theme.gap - self.width : nav.x + 6px;
+            y: root.wide ? nav.y + 6px + 2 * (Theme.fab-size + 6px) : nav.y + 6px;
+            width: root.wide
+                ? min(340px, nav.x - Theme.gap - root.content-left - Theme.nav-side)
+                : nav.width - 2 * Theme.fab-size - 4 * 6px;
+            height: root.wide ? Theme.fab-size : nav.height - 12px;
+            solid: root.wide;
+            drag: mic.drag;
+            armed: mic.armed;
+        }
+
+        // Pista sobre la barra mientras se graba.
+        Rectangle {
+            property <bool> shown: Voice.state == 1 && !mic.armed;
+            width: hint.preferred-width + 28px;
+            height: 30px;
+            x: root.wide
+                ? strip.x + (strip.width - self.width) / 2
+                : nav.x + (nav.width - Theme.fab-size - 6px - self.width) / 2;
+            y: (root.wide ? strip.y : nav.y) - self.height - 10px + (self.shown ? 0px : 8px);
+            border-radius: self.height / 2;
+            background: Theme.chip;
+            opacity: self.shown ? 1 : 0;
+            visible: self.opacity > 0.01;
+            animate opacity, y { duration: 280ms; easing: ease-out-quart; }
+            hint := Text {
+                text: "‹  DESLIZA PARA CANCELAR";
+                font-family: Theme.font-mono;
+                font-size: 10px;
+                letter-spacing: self.font-size * Theme.tracking;
+                color: Theme.muted;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+            }
+        }
+
+        // ── Confirmación de lo dictado ──
+        VoiceReview {
+            x: 0;
+            y: 0;
+            width: root.width;
+            height: root.height;
+            bottom-y: root.wide ? root.height - root.inset-bottom - 12px : nav.y + nav.height;
+            side: root.wide ? (root.width - root.panel-width) / 2 : Theme.nav-side;
+            create(name, meal) => {
+                Voice.close();
+                root.open-add-new(name, meal);
+            }
+        }
+
+        // ── Hojas ──
+        add-sheet := AddFoodSheet {
+            x: 0;
+            y: 0;
+            width: root.width;
+            height: root.height;
+            open: root.add-open;
+            top-inset: root.inset-top;
+            bottom-inset: root.inset-bottom;
+            keyboard-height: root.keyboard-height;
+            done => {
+                root.add-open = false;
+                root.tab = 0;
+                keys.focus();
+            }
+            refocus => {
+                keys.focus();
+            }
+            dismiss => {
+                root.close-add();
+            }
+        }
+
+        goals-sheet := GoalsSheet {
+            x: 0;
+            y: 0;
+            width: root.width;
+            height: root.height;
+            open: root.goals-open;
+            top-inset: root.inset-top;
+            bottom-inset: root.inset-bottom;
+            keyboard-height: root.keyboard-height;
+            validate(k, p, c, f) => {
+                return root.validate-goals(k, p, c, f);
+            }
+            submit(k, p, c, f) => {
+                if root.save-goals(k, p, c, f) {
+                    root.goals-open = false;
+                    keys.focus();
+                    return true;
+                }
+                return false;
+            }
+            dismiss => {
+                root.close-goals();
+            }
+        }
+    }
+}

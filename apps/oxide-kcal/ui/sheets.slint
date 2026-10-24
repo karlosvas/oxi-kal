@@ -1,0 +1,90 @@
+// Hoja inferior de objetivos diarios.
+
+import { Theme, Sheet, Field, PrimaryButton } from "@oxide-theme";
+
+export component GoalsSheet inherits Sheet {
+    title: "OBJETIVOS DIARIOS";
+    pure callback validate(string, string, string, string) -> bool;
+    callback submit(string, string, string, string) -> bool;
+
+    property <bool> valid: root.validate(kcal.text, protein.text, carbs.text, fat.text);
+
+    public function load(k: string, p: string, c: string, f: string) {
+        kcal.text = k;
+        protein.text = p;
+        carbs.text = c;
+        fat.text = f;
+    }
+    public function blur() {
+        kcal.blur();
+        protein.blur();
+        carbs.blur();
+        fat.blur();
+    }
+    function try-submit() {
+        if root.valid && root.submit(kcal.text, protein.text, carbs.text, fat.text) {
+            root.blur();
+        }
+    }
+
+    kcal := Field {
+        label: "ENERGÍA";
+        placeholder: "2200";
+        suffix: "kcal";
+        input-type: InputType.number;
+        accepted => {
+            protein.focus();
+        }
+        back-pressed => {
+            root.dismiss();
+        }
+    }
+
+    HorizontalLayout {
+        spacing: Theme.gap;
+        protein := Field {
+            label: "PROT";
+            placeholder: "150";
+            suffix: "g";
+            input-type: InputType.number;
+            accepted => {
+                carbs.focus();
+            }
+            back-pressed => {
+                root.dismiss();
+            }
+        }
+        carbs := Field {
+            label: "CARB";
+            placeholder: "230";
+            suffix: "g";
+            input-type: InputType.number;
+            accepted => {
+                fat.focus();
+            }
+            back-pressed => {
+                root.dismiss();
+            }
+        }
+        fat := Field {
+            label: "GRASA";
+            placeholder: "70";
+            suffix: "g";
+            input-type: InputType.number;
+            accepted => {
+                root.try-submit();
+            }
+            back-pressed => {
+                root.dismiss();
+            }
+        }
+    }
+
+    PrimaryButton {
+        text: "GUARDAR";
+        enabled: root.valid;
+        clicked => {
+            root.try-submit();
+        }
+    }
+}

@@ -1,0 +1,663 @@
+// Dictado por voz: botón de micro (mantener pulsado para hablar, soltar para enviar,
+// deslizar a la izquierda para cancelar), barra de grabación y confirmación de cada
+// alimento entendido, uno detrás de otro.
+
+import {
+    Theme, Patina, Label, Mono, Sans, DotValue, PrimaryButton, GhostButton, IconButton, IconClose,
+    IconMic, StepButton,
+} from "@oxide-theme";
+
+export struct VoiceCard {
+    // `false`: no está en la lista (se ofrece crearlo).
+    known: bool,
+    name: string,
+    amount: string,
+    kcal: string,
+    macros: string,
+    meal: int,
+}
+
+// Puente con Rust para el dictado.
+export global Voice {
+    // 0 reposo · 1 grabando · 2 transcribiendo · 3 confirmando
+    in property <int> state;
+    // Nivel de la voz (0..1) y los últimos niveles para la onda.
+    in property <float> level;
+    in property <[float]> wave;
+    in property <string> elapsed;
+    in property <string> status;
+    in property <string> transcript;
+    in property <VoiceCard> card;
+    in property <int> step;
+    in property <int> count;
+    // No se dijo la comida: se pregunta antes de los alimentos (sugerida en `card.meal`).
+    in property <bool> asking;
+    // Lo entendido, para la pregunta («Huevo · Leche entera»).
+    in property <string> summary;
+
+    // Empieza a grabar; `false` si no se puede (sin permiso, sin micrófono).
+    callback press() -> bool;
+    // Suelta el botón: `true` para descartar lo grabado.
+    callback release(bool);
+    // El dedo ha cruzado el umbral de cancelar.
+    callback armed();
+    callback accept();
+    callback skip();
+    callback adjust(int);
+    callback set-meal(int);
+    callback choose-meal(int);
+    callback close();
+}
+
+// ───────────────────────── Botón ─────────────────────────
+
+// Botón de micro de la barra flotante.
+export component MicButton inherits Rectangle {
+    // Desplazamiento del dedo hacia la izquierda (≤ 0) y umbral para cancelar.
+    out property <length> drag;
+    in property <length> cancel-distance: 104px;
+    out property <bool> armed: root.drag < -root.cancel-distance;
+
+    property <bool> holding;
+    property <bool> recording: Voice.state == 1;
+    property <bool> available: Voice.state <= 1;
+
+    width: Theme.fab-size;
+    height: Theme.fab-size;
+    accessible-role: button;
+    accessible-label: "Dictar alimentos: mantén pulsado y habla";
+
+    changed armed => {
+        if self.armed && root.holding {
+            Voice.armed();
+        }
+    }
+    changed recording => {
+        if !self.recording {
+            root.drag = 0;
+        }
+    }
+
+    // Anillo que crece con la voz (relleno sólido translúcido, sin brillo).
+    if root.recording: Rectangle {
+        property <length> size: Theme.fab-size * (1.22 + 0.95 * Voice.level);
+        animate size { duration: 110ms; easing: ease-out-quad; }
+        x: (root.width - self.size) / 2 + face.x;
+        y: (root.height - self.size) / 2;
+        width: self.size;
+        height: self.size;
+        border-radius: self.size / 2;
+        background: root.armed ? Theme.track.transparentize(0.4) : Theme.accent.transparentize(0.8);
+        animate background { duration: 160ms; }
+    }
+
+    // Anillo que respira mientras se graba.
+    if root.recording: Rectangle {
+        property <float> breath: (1 + sin(animation-tick() / 1ms * 0.24deg)) / 2;
+        property <length> size: Theme.fab-size * (1.3 + 0.55 * self.breath);
+        x: (root.width - self.size) / 2 + face.x;
+        y: (root.height - self.size) / 2;
+        width: self.size;
+        height: self.size;
+        border-radius: self.size / 2;
+        border-width: 1.5px;
+        border-color: root.armed ? transparent : Theme.accent.transparentize(0.45 + 0.5 * self.breath);
+    }
+
+    face := Rectangle {
+        // Sigue un poco al dedo al deslizar para cancelar.
+        x: root.recording ? max(-48px, root.drag * 0.4) : 0px;
+        y: 0;
+        width: root.width;
+        height: root.height;
+        border-radius: self.width / 2;
+        clip: true;
+        background: root.recording ? (root.armed ? Theme.track : Theme.accent) : touch.pressed ? Theme.nav-active.brighter(0.3) : Theme.nav-active;
+        animate background { duration: 160ms; }
+        opacity: root.available ? 1 : 0.4;
+        animate opacity { duration: 200ms; }
+        transform-scale: root.recording ? (root.armed ? 0.86 : 1.2) : touch.pressed ? 0.88 : 1;
+        animate transform-scale { duration: 460ms; easing: ease-out-back; }
+
+        if Patina.circle.width > 0: Image {
+            width: 100%;
+            height: 100%;
+            source: Patina.circle;
+            image-fit: fill;
+            opacity: root.recording && !root.armed ? 1 : 0;
+            animate opacity { duration: 200ms; }
+        }
+        if !root.armed: IconMic {
+            color: root.recording ? Theme.on-accent : Theme.ink;
+            size: 22px;
+        }
+        if root.armed: IconClose {
+            color: Theme.ink;
+            size: 20px;
+        }
+    }
+
+    touch := TouchArea {
+        enabled: root.available;
+        pointer-event(event) => {
+            if event.kind == PointerEventKind.down {
+                root.drag = 0;
+                root.holding = Voice.press();
+            } else if (event.kind == PointerEventKind.up || event.kind == PointerEventKind.cancel) && root.holding {
+                root.holding = false;
+                Voice.release(event.kind == PointerEventKind.cancel || root.armed);
+                root.drag = 0;
+            }
+        }
+        moved => {
+            if root.holding {
+                root.drag = min(0px, self.mouse-x - self.pressed-x);
+            }
+        }
+    }
+}
+
+// ───────────────────────── Barra de grabación ─────────────────────────
+
+// Columna de la onda: cinco puntos que se encienden desde el centro según el nivel.
+component WaveColumn {
+    in property <float> level;
+    in property <bool> muted;
+    width: 4px;
+    height: 32px;
+
+    for row in 5: Rectangle {
+        // Distancia al centro (0, 1, 2): se enciende si el nivel llega.
+        property <int> distance: Math.abs(row - 2);
+        x: 0;
+        y: row * 7px;
+        width: 4px;
+        height: 4px;
+        border-radius: 2px;
+        background: root.level * 2.6 > self.distance + 0.15
+            ? (root.muted ? Theme.muted : Theme.accent)
+            : Theme.track;
+    }
+}
+
+// Contenido de la barra flotante mientras se graba o se transcribe.
+export component VoiceStrip inherits Rectangle {
+    in property <length> drag;
+    in property <bool> armed;
+    // Con fondo propio (en horizontal no hay barra debajo).
+    in property <bool> solid;
+    property <bool> recording: Voice.state == 1;
+    property <bool> working: Voice.state == 2;
+
+    // Sin fondo salvo `solid`: las pestañas de debajo se apartan solas y así el halo del
+    // micro se ve entero. Recortado: al deslizar para cancelar, el contenido se esconde.
+    background: root.solid ? Theme.nav : transparent;
+    border-radius: self.height / 2;
+    clip: true;
+    opacity: root.recording || root.working ? 1 : 0;
+    visible: self.opacity > 0.01;
+    animate opacity { duration: 200ms; easing: ease-out-quad; }
+    accessible-role: AccessibleRole.text;
+    accessible-label: root.recording ? "Grabando " + Voice.elapsed : Voice.status;
+
+    // Grabando: punto rojo intermitente, tiempo y onda de puntos.
+    HorizontalLayout {
+        x: root.recording ? max(-72px, root.drag * 0.55) : 0px;
+        width: root.width;
+        opacity: root.recording ? clamp(1 + root.drag / 220px, 0.2, 1) : 0;
+        animate opacity { duration: 120ms; }
+        padding-left: 18px;
+        padding-right: 14px;
+        spacing: 10px;
+        alignment: start;
+
+        VerticalLayout {
+            alignment: center;
+            Rectangle {
+                width: 8px;
+                height: 8px;
+                border-radius: 4px;
+                background: root.armed ? Theme.muted : Theme.accent;
+                opacity: root.recording ? (0.35 + 0.65 * (1 + sin(animation-tick() / 1ms * 0.36deg)) / 2) : 1;
+            }
+        }
+        Mono {
+            text: Voice.elapsed;
+            font-size: 14px;
+            color: root.armed ? Theme.muted : Theme.ink;
+        }
+        if !root.armed: HorizontalLayout {
+            horizontal-stretch: 1;
+            alignment: end;
+            spacing: 3px;
+            for v in Voice.wave: VerticalLayout {
+                alignment: center;
+                WaveColumn {
+                    level: v;
+                }
+            }
+        }
+        if root.armed: Label {
+            horizontal-stretch: 1;
+            text: "SUELTA PARA CANCELAR";
+            color: Theme.accent;
+            horizontal-alignment: right;
+        }
+    }
+
+    // Transcribiendo: tres puntos que se encienden por turnos.
+    HorizontalLayout {
+        opacity: root.working ? 1 : 0;
+        animate opacity { duration: 200ms; }
+        padding-left: 20px;
+        padding-right: 16px;
+        spacing: 14px;
+        alignment: start;
+        if root.working: HorizontalLayout {
+            spacing: 6px;
+            for i in 3: VerticalLayout {
+                alignment: center;
+                Rectangle {
+                    property <int> lit: Math.mod(Math.floor(animation-tick() / 260ms), 4);
+                    width: 6px;
+                    height: 6px;
+                    border-radius: 3px;
+                    background: i < self.lit ? Theme.accent : Theme.track;
+                }
+            }
+        }
+        Label {
+            text: Voice.status;
+            color: Theme.ink;
+            font-size: 11px;
+        }
+    }
+}
+
+// ───────────────────────── Confirmación ─────────────────────────
+
+// Respuesta a «¿En qué comida lo apunto?». La sugerida por la hora va marcada.
+component MealOption inherits Rectangle {
+    in property <string> text;
+    in property <bool> suggested;
+    callback clicked();
+
+    height: 54px;
+    horizontal-stretch: 1;
+    border-radius: self.height / 2;
+    background: touch.pressed ? Theme.nav-active : Theme.chip;
+    animate background { duration: 120ms; }
+    border-width: root.suggested ? 1.5px : 0px;
+    border-color: Theme.accent;
+    transform-scale: touch.pressed ? 0.95 : 1;
+    animate transform-scale { duration: 380ms; easing: ease-out-back; }
+    accessible-role: button;
+    accessible-label: root.suggested ? root.text + ", sugerida por la hora" : root.text;
+    accessible-action-default => {
+        root.clicked();
+    }
+
+    Text {
+        text: root.text;
+        font-family: Theme.font-mono;
+        font-weight: 500;
+        font-size: 12px;
+        letter-spacing: self.font-size * Theme.tracking;
+        color: root.suggested ? Theme.accent : Theme.ink;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+
+    touch := TouchArea {
+        clicked => {
+            root.clicked();
+        }
+    }
+}
+
+// Capa con una tarjeta por alimento entendido: ACEPTAR lo añade, CANCELAR lo salta.
+export component VoiceReview {
+    // Borde inferior de la tarjeta y margen lateral (los de la barra flotante).
+    in property <length> bottom-y;
+    in property <length> side;
+    // Crear en la lista un alimento que no estaba (nombre, comida).
+    callback create(string, int);
+
+    property <bool> open: Voice.state == 3;
+    property <[string]> meals: ["DESAYUNO", "COMIDA", "CENA", "SNACK"];
+
+    // Transición entre tarjetas: el contenido sale (aceptado hacia abajo, saltado a la
+    // izquierda), se cambia y entra desde la derecha.
+    property <length> dx;
+    property <length> dy;
+    property <float> fade: 1;
+    // 0 quieto · 1 saliendo · 2 entrando
+    property <int> phase;
+    // Lo que se hace al terminar de salir: 1 aceptar · 2 saltar · 3 elegir comida.
+    property <int> pending;
+    property <int> chosen-meal;
+
+    function leave(action: int) {
+        if root.phase == 0 {
+            root.pending = action;
+            root.phase = 1;
+        }
+    }
+
+    function choose(meal: int) {
+        if root.phase == 0 {
+            root.chosen-meal = meal;
+            root.leave(3);
+        }
+    }
+
+    changed open => {
+        if self.open {
+            root.dx = 0;
+            root.dy = 0;
+            root.fade = 1;
+            root.phase = 0;
+        }
+    }
+
+    Timer {
+        interval: 16ms;
+        running: root.phase != 0;
+        triggered => {
+            if root.phase == 1 {
+                if root.pending == 2 {
+                    root.dx += (-56px - root.dx) * 0.3;
+                } else {
+                    root.dy += (28px - root.dy) * 0.3;
+                }
+                root.fade = max(0, root.fade - 0.14);
+                if root.fade <= 0 {
+                    if root.pending == 1 {
+                        Voice.accept();
+                    } else if root.pending == 2 {
+                        Voice.skip();
+                    } else {
+                        Voice.choose-meal(root.chosen-meal);
+                    }
+                    root.dx = 48px;
+                    root.dy = 0;
+                    root.phase = 2;
+                }
+            } else {
+                root.dx += (0px - root.dx) * 0.24;
+                root.fade = min(1, root.fade + 0.1);
+                if abs(root.dx) < 0.5px && root.fade >= 1 {
+                    root.dx = 0;
+                    root.phase = 0;
+                }
+            }
+        }
+    }
+
+    // Oscurece el resto: mientras se confirma no se toca nada más.
+    Rectangle {
+        width: 100%;
+        height: 100%;
+        background: Theme.scrim;
+        opacity: root.open ? 1 : 0;
+        visible: self.opacity > 0.01;
+        animate opacity { duration: 220ms; easing: ease-out-quad; }
+        TouchArea {
+            enabled: root.open;
+        }
+    }
+
+    card := Rectangle {
+        x: root.side;
+        width: root.width - 2 * root.side;
+        height: body.preferred-height;
+        y: root.bottom-y - self.height + (root.open ? 0px : 36px);
+        animate y { duration: 520ms; easing: cubic-bezier(0.2, 1.15, 0.38, 1); }
+        opacity: root.open ? 1 : 0;
+        visible: self.opacity > 0.01;
+        animate opacity { duration: 200ms; easing: ease-out-quad; }
+        transform-scale: root.open ? 1 : 0.94;
+        animate transform-scale { duration: 520ms; easing: ease-out-back; }
+        background: Theme.card;
+        border-radius: Theme.radius-hero;
+        accessible-role: groupbox;
+        accessible-label: Voice.asking ? "¿En qué comida lo apunto?" : Voice.card.known ? "Añadir " + Voice.card.name + ", " + Voice.card.amount + ", " + Voice.card.kcal + " kcal" : Voice.card.name + " no está en tu lista";
+
+        TouchArea { }
+
+        body := VerticalLayout {
+            padding: 20px;
+            padding-top: 18px;
+            spacing: 14px;
+
+            // Progreso, comida y cerrar.
+            HorizontalLayout {
+                spacing: 10px;
+                if Voice.asking: Label {
+                    horizontal-stretch: 1;
+                    min-height: 30px;
+                    text: Voice.count == 1 ? "1 ALIMENTO" : "\{Voice.count} ALIMENTOS";
+                    font-size: 10px;
+                }
+                if !Voice.asking: HorizontalLayout {
+                    horizontal-stretch: 1;
+                    spacing: 5px;
+                    alignment: start;
+                    for i in Voice.count: VerticalLayout {
+                        alignment: center;
+                        Rectangle {
+                            width: i == Voice.step ? 16px : 6px;
+                            height: 6px;
+                            border-radius: 3px;
+                            background: i < Voice.step ? Theme.muted : i == Voice.step ? Theme.accent : Theme.track;
+                            animate width, background { duration: 260ms; easing: ease-out-quart; }
+                        }
+                    }
+                    Label {
+                        text: "  \{Voice.step + 1}/\{Voice.count}";
+                        font-size: 10px;
+                    }
+                }
+                // Toca para cambiar de comida.
+                if !Voice.asking: Rectangle {
+                    width: meal-label.preferred-width + 24px;
+                    height: 30px;
+                    border-radius: Theme.radius-chip;
+                    background: meal-touch.pressed ? Theme.nav-active : Theme.chip;
+                    accessible-role: button;
+                    accessible-label: "Comida: " + root.meals[Voice.card.meal] + ". Cambiar";
+                    accessible-action-default => {
+                        Voice.set-meal(Math.mod(Voice.card.meal + 1, 4));
+                    }
+                    meal-label := Text {
+                        text: root.meals[Voice.card.meal];
+                        font-family: Theme.font-mono;
+                        font-size: 11px;
+                        letter-spacing: self.font-size * Theme.tracking;
+                        color: Theme.accent;
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
+                    }
+                    meal-touch := TouchArea {
+                        clicked => {
+                            Voice.set-meal(Math.mod(Voice.card.meal + 1, 4));
+                        }
+                    }
+                }
+                IconButton {
+                    label: "Descartar lo dictado";
+                    size: 30px;
+                    clicked => {
+                        Voice.close();
+                    }
+                    IconClose {
+                        size: 16px;
+                        color: Theme.muted;
+                    }
+                }
+            }
+
+            // Lo que se ha oído.
+            Text {
+                text: "«" + Voice.transcript + "»";
+                font-family: Theme.font-mono;
+                font-size: 11px;
+                color: Theme.muted;
+                wrap: word-wrap;
+                overflow: elide;
+                max-height: 48px;
+            }
+
+            // El alimento (se desliza al cambiar de tarjeta).
+            Rectangle {
+                height: item.preferred-height;
+                clip: true;
+                item := VerticalLayout {
+                    x: root.dx;
+                    y: root.dy;
+                    width: parent.width;
+                    opacity: root.fade;
+                    spacing: 12px;
+
+                    // Pregunta de la comida (cuando no se dijo).
+                    if Voice.asking: Sans {
+                        text: "¿En qué comida lo apunto?";
+                        font-size: 24px;
+                        font-weight: 600;
+                        wrap: word-wrap;
+                    }
+                    if Voice.asking: Label {
+                        text: Voice.summary;
+                        font-size: 11px;
+                        letter-spacing: 0;
+                        wrap: word-wrap;
+                    }
+                    if Voice.asking: VerticalLayout {
+                        padding-top: 4px;
+                        spacing: Theme.gap;
+                        HorizontalLayout {
+                            spacing: Theme.gap;
+                            MealOption {
+                                width: (item.width - Theme.gap) / 2;
+                                text: root.meals[0];
+                                suggested: Voice.card.meal == 0;
+                                clicked => {
+                                    root.choose(0);
+                                }
+                            }
+                            MealOption {
+                                width: (item.width - Theme.gap) / 2;
+                                text: root.meals[1];
+                                suggested: Voice.card.meal == 1;
+                                clicked => {
+                                    root.choose(1);
+                                }
+                            }
+                        }
+                        HorizontalLayout {
+                            spacing: Theme.gap;
+                            MealOption {
+                                width: (item.width - Theme.gap) / 2;
+                                text: root.meals[3];
+                                suggested: Voice.card.meal == 3;
+                                clicked => {
+                                    root.choose(3);
+                                }
+                            }
+                            MealOption {
+                                width: (item.width - Theme.gap) / 2;
+                                text: root.meals[2];
+                                suggested: Voice.card.meal == 2;
+                                clicked => {
+                                    root.choose(2);
+                                }
+                            }
+                        }
+                    }
+
+                    // El alimento.
+                    if !Voice.asking && !Voice.card.known: Label {
+                        text: "NO ESTÁ EN TU LISTA";
+                        color: Theme.accent;
+                    }
+                    if !Voice.asking: Sans {
+                        text: Voice.card.name;
+                        font-size: 24px;
+                        font-weight: 600;
+                        wrap: word-wrap;
+                    }
+                    if !Voice.asking && Voice.card.known: HorizontalLayout {
+                        spacing: 10px;
+                        StepButton {
+                            label: "Menos";
+                            minus: true;
+                            step => {
+                                Voice.adjust(-1);
+                            }
+                        }
+                        VerticalLayout {
+                            alignment: center;
+                            min-width: 64px;
+                            Mono {
+                                text: Voice.card.amount;
+                                font-size: 16px;
+                                horizontal-alignment: center;
+                            }
+                        }
+                        StepButton {
+                            label: "Más";
+                            step => {
+                                Voice.adjust(1);
+                            }
+                        }
+                        VerticalLayout {
+                            horizontal-stretch: 1;
+                            alignment: center;
+                            HorizontalLayout {
+                                alignment: end;
+                                DotValue {
+                                    value: Voice.card.kcal;
+                                    unit: "kcal";
+                                    size: 36px;
+                                }
+                            }
+                        }
+                    }
+                    if !Voice.asking && Voice.card.known: Label {
+                        text: Voice.card.macros;
+                        font-size: 10px;
+                        letter-spacing: 0;
+                    }
+                    if !Voice.asking && !Voice.card.known: Label {
+                        text: "Créalo con sus valores y se quedará en tu lista para la próxima vez.";
+                        font-size: 11px;
+                        letter-spacing: 0;
+                        wrap: word-wrap;
+                    }
+                }
+            }
+
+            if !Voice.asking: HorizontalLayout {
+                spacing: Theme.gap;
+                GhostButton {
+                    text: Voice.card.known ? "CANCELAR" : "SALTAR";
+                    min-width: 112px;
+                    clicked => {
+                        root.leave(2);
+                    }
+                }
+                PrimaryButton {
+                    horizontal-stretch: 1;
+                    text: Voice.card.known ? "ACEPTAR" : "CREAR";
+                    clicked => {
+                        if Voice.card.known {
+                            root.leave(1);
+                        } else {
+                            root.create(Voice.card.name, Voice.card.meal);
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

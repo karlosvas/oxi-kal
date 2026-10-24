@@ -1,0 +1,432 @@
+// Pantalla Peso con el sistema Bento: peso actual, registro de hoy, gráfica, estadísticas e historial.
+
+import { Theme, Motion, Card, Chip, Label, Mono, DotText, DotValue, Sans, Segmented, StepButton, PrimaryButton } from "@oxide-theme";
+
+export struct WeightRow {
+    date: string,
+    kg: string,
+    delta: string,
+}
+
+export struct StatInfo {
+    label: string,
+    value: string,
+    unit: string,
+}
+
+component StatCard inherits Card {
+    in property <StatInfo> info;
+    radius: Theme.radius-macro;
+    accessible-role: groupbox;
+    accessible-label: root.info.label + " " + root.info.value + " " + root.info.unit;
+
+    VerticalLayout {
+        padding: Theme.pad-macro;
+        spacing: 14px;
+        Label {
+            text: root.info.label;
+            font-size: 10px;
+        }
+        DotValue {
+            value: root.info.value;
+            unit: root.info.unit;
+            size: 30px;
+        }
+    }
+}
+
+// Gráfica de línea. Las coordenadas llegan normalizadas en una caja de 1000×1000.
+component WeightChart {
+    in property <string> commands;
+    in property <float> end-x;
+    in property <float> end-y;
+    in property <string> max-label;
+    in property <string> mid-label;
+    in property <string> min-label;
+    in property <string> start-label;
+    in property <string> end-label;
+    in property <string> description;
+    // Al activarse la pestaña o cambiar los datos, la línea se dibuja de izquierda a derecha.
+    in property <bool> active;
+
+    property <float> reveal: 0;
+    property <float> eased: 1 - Math.pow(1 - root.reveal, 3);
+    changed commands => {
+        root.reveal = 0;
+    }
+    changed active => {
+        if root.active {
+            root.reveal = 0;
+        }
+    }
+    Timer {
+        interval: 16ms;
+        running: root.active && Motion.ready && root.reveal < 1;
+        triggered => {
+            root.reveal = Math.min(1, root.reveal + 0.035);
+        }
+    }
+
+    property <length> axis-width: 40px;
+    property <length> plot-top: 8px;
+    property <length> plot-height: 150px;
+    property <length> stroke: 2px;
+
+    height: root.plot-top + root.plot-height + 34px;
+    accessible-role: image;
+    accessible-label: root.description;
+
+    // Rejilla y eje: máx / medio / mín.
+    for label[i] in [root.max-label, root.mid-label, root.min-label]: Rectangle {
+        property <length> line-y: root.plot-top + root.stroke / 2 + (root.plot-height - root.stroke) * i / 2;
+        Rectangle {
+            x: root.axis-width;
+            y: parent.line-y;
+            width: root.width - root.axis-width;
+            height: 1px;
+            background: Theme.divider;
+        }
+        Label {
+            x: 0;
+            y: parent.line-y - self.height / 2;
+            width: root.axis-width - 8px;
+            text: label;
+            font-size: 10px;
+            letter-spacing: 0;
+            horizontal-alignment: left;
+        }
+    }
+
+    plot := Rectangle {
+        x: root.axis-width;
+        y: root.plot-top;
+        width: root.width - root.axis-width;
+        height: root.plot-height;
+
+        Rectangle {
+            x: 0;
+            y: -4px;
+            width: (plot.width + 8px) * root.eased;
+            height: plot.height + 8px;
+            clip: true;
+            Path {
+                x: 0;
+                y: 4px;
+                width: plot.width;
+                height: plot.height;
+                viewbox-width: 1000;
+                viewbox-height: 1000;
+                fit: fill;
+                stroke: Theme.accent;
+                stroke-width: root.stroke;
+                stroke-line-cap: round;
+                stroke-line-join: round;
+                commands: root.commands;
+            }
+        }
+
+        // Punto final destacado: aparece con un pequeño rebote al terminar la línea.
+        Rectangle {
+            transform-scale: root.eased > 0.97 ? 1 : 0;
+            animate transform-scale { duration: 420ms; easing: ease-out-back; }
+            width: 14px;
+            height: 14px;
+            x: root.stroke / 2 + (plot.width - root.stroke) * root.end-x - self.width / 2;
+            y: root.stroke / 2 + (plot.height - root.stroke) * root.end-y - self.height / 2;
+            border-radius: self.width / 2;
+            background: Theme.accent;
+            border-width: 3px;
+            border-color: Theme.card;
+        }
+    }
+
+    Label {
+        x: root.axis-width;
+        y: root.plot-top + root.plot-height + 14px;
+        text: root.start-label;
+        font-size: 10px;
+        letter-spacing: 0;
+    }
+    Label {
+        x: root.width - self.width;
+        y: root.plot-top + root.plot-height + 14px;
+        text: root.end-label;
+        font-size: 10px;
+        letter-spacing: 0;
+        horizontal-alignment: right;
+    }
+}
+
+component HistoryItem inherits Rectangle {
+    in property <WeightRow> item;
+    in property <bool> last;
+    accessible-role: list-item;
+    accessible-label: root.item.date + ", " + root.item.kg + " kg, variación " + root.item.delta;
+
+    VerticalLayout {
+        HorizontalLayout {
+            padding-top: 14px;
+            padding-bottom: 14px;
+            spacing: 12px;
+            VerticalLayout {
+                horizontal-stretch: 1;
+                spacing: 3px;
+                Sans {
+                    text: root.item.date;
+                }
+                Label {
+                    text: root.item.delta;
+                    font-size: 10px;
+                    letter-spacing: 0;
+                }
+            }
+            Mono {
+                text: root.item.kg + " kg";
+                horizontal-alignment: right;
+            }
+        }
+        if !root.last: Rectangle {
+            height: 1px;
+            background: Theme.divider;
+        }
+    }
+}
+
+export component PesoPage inherits Flickable {
+    in property <length> bottom-space;
+    in property <bool> active;
+    // Peso actual
+    in property <bool> has-data;
+    in property <string> current;
+    in property <string> delta-text;
+    // Registrar hoy
+    in property <string> draft;
+    in property <bool> draft-saved;
+    callback step(int);
+    callback save();
+    // Gráfica
+    in-out property <int> range-index;
+    callback range-changed(int);
+    in property <bool> chart-ready;
+    in property <string> chart-commands;
+    in property <float> chart-end-x;
+    in property <float> chart-end-y;
+    in property <string> chart-max;
+    in property <string> chart-mid;
+    in property <string> chart-min;
+    in property <string> chart-start;
+    in property <string> chart-end;
+    in property <string> chart-empty;
+    in property <string> chart-description;
+    // Estadísticas e historial
+    in property <[StatInfo]> stats;
+    in property <[WeightRow]> history;
+
+    // Dos columnas: en vertical, una debajo de otra; en horizontal (`wide`), lado a lado.
+    in property <bool> wide;
+
+    property <length> pad: Theme.screen-padding;
+    property <length> top: 18px;
+    property <length> column-width: root.wide ? (root.width - 2 * root.pad - Theme.gap) / 2 : root.width - 2 * root.pad;
+    property <length> half: (root.column-width - Theme.gap) / 2;
+
+    content-width: root.width;
+    content-height: max(root.height, max(today.y + today.height, trend.y + trend.height) + root.bottom-space);
+
+    // Hoy: peso actual y registro.
+    today := VerticalLayout {
+        x: root.pad;
+        y: root.top;
+        width: root.column-width;
+        height: self.preferred-height;
+        spacing: Theme.gap;
+        alignment: start;
+
+        // Peso actual y variación de 7 días.
+        Card {
+            radius: Theme.radius-hero;
+            enter-delay: 0ms;
+            accessible-role: groupbox;
+            accessible-label: root.has-data ? "Peso actual " + root.current + " kg, " + root.delta-text : "Sin registros de peso";
+
+            VerticalLayout {
+                padding: Theme.pad-hero;
+                padding-bottom: 22px;
+                spacing: 14px;
+                Label {
+                    text: "PESO ACTUAL";
+                }
+                DotValue {
+                    value: root.has-data ? root.current : "—";
+                    unit: root.has-data ? "kg" : "";
+                    size: 64px;
+                    unit-size: 12px;
+                }
+                HorizontalLayout {
+                    alignment: start;
+                    Chip {
+                        text: root.delta-text;
+                    }
+                }
+            }
+        }
+
+        // Registrar hoy.
+        Card {
+            radius: Theme.radius-hero;
+            enter-delay: 70ms;
+            accessible-role: groupbox;
+            accessible-label: "Registrar hoy";
+
+            VerticalLayout {
+                padding: 20px;
+                spacing: 16px;
+                Label {
+                    text: "REGISTRAR HOY";
+                }
+                HorizontalLayout {
+                    alignment: space-between;
+                    VerticalLayout {
+                        alignment: center;
+                        StepButton {
+                            minus: true;
+                            label: "Restar 0,1 kg";
+                            step => {
+                                root.step(-1);
+                            }
+                        }
+                    }
+                    VerticalLayout {
+                        alignment: center;
+                        spacing: 6px;
+                        DotText {
+                            text: root.draft;
+                            font-size: 48px;
+                            horizontal-alignment: center;
+                            accessible-role: AccessibleRole.text;
+                            accessible-label: root.draft + " kg";
+                        }
+                        Label {
+                            text: "KG";
+                            font-size: 10px;
+                            horizontal-alignment: center;
+                        }
+                    }
+                    VerticalLayout {
+                        alignment: center;
+                        StepButton {
+                            minus: false;
+                            label: "Sumar 0,1 kg";
+                            step => {
+                                root.step(1);
+                            }
+                        }
+                    }
+                }
+                PrimaryButton {
+                    text: root.draft-saved ? "REGISTRADO" : "GUARDAR PESO";
+                    enabled: !root.draft-saved;
+                    clicked => {
+                        root.save();
+                    }
+                }
+            }
+        }
+    }
+
+    // Evolución: gráfica, estadísticas e historial; debajo o a la derecha.
+    trend := VerticalLayout {
+        x: root.wide ? root.pad + root.column-width + Theme.gap : root.pad;
+        y: root.wide ? root.top : today.y + today.height + Theme.gap;
+        width: root.column-width;
+        height: self.preferred-height;
+        spacing: Theme.gap;
+        alignment: start;
+
+        // Gráfica del rango.
+        Card {
+            radius: Theme.radius-hero;
+            enter-delay: 140ms;
+
+            VerticalLayout {
+                padding: 20px;
+                spacing: 18px;
+                HorizontalLayout {
+                    spacing: 12px;
+                    Label {
+                        horizontal-stretch: 1;
+                        text: "EVOLUCIÓN";
+                    }
+                    Segmented {
+                        width: 168px;
+                        label: "Rango de la gráfica";
+                        options: ["7D", "30D", "60D"];
+                        current <=> root.range-index;
+                        changed(i) => {
+                            root.range-changed(i);
+                        }
+                    }
+                }
+                if root.chart-ready: WeightChart {
+                    active: root.active;
+                    commands: root.chart-commands;
+                    end-x: root.chart-end-x;
+                    end-y: root.chart-end-y;
+                    max-label: root.chart-max;
+                    mid-label: root.chart-mid;
+                    min-label: root.chart-min;
+                    start-label: root.chart-start;
+                    end-label: root.chart-end;
+                    description: root.chart-description;
+                }
+                if !root.chart-ready: VerticalLayout {
+                    padding-top: 36px;
+                    padding-bottom: 36px;
+                    Sans {
+                        text: root.chart-empty;
+                        color: Theme.muted;
+                        horizontal-alignment: center;
+                        wrap: word-wrap;
+                    }
+                }
+            }
+        }
+
+        // Estadísticas del rango (2×2).
+        for row in [0, 1]: HorizontalLayout {
+            spacing: Theme.gap;
+            for col in [0, 1]: StatCard {
+                width: root.half;
+                enter-delay: 200ms + (row * 2 + col) * 40ms;
+                info: root.stats[row * 2 + col];
+            }
+        }
+
+        // Historial: últimos 5 registros.
+        Card {
+            radius: Theme.radius-list;
+            enter-delay: 280ms;
+            accessible-role: list;
+            accessible-label: "Historial";
+
+            VerticalLayout {
+                padding-left: Theme.pad-list;
+                padding-right: Theme.pad-list;
+                padding-top: 20px;
+                padding-bottom: 8px;
+                Label {
+                    text: "HISTORIAL";
+                }
+                if root.history.length == 0: Sans {
+                    height: 64px;
+                    text: "Sin registros de peso";
+                    color: Theme.muted;
+                }
+                for item[i] in root.history: HistoryItem {
+                    item: item;
+                    last: i == root.history.length - 1;
+                }
+            }
+        }
+    }
+}

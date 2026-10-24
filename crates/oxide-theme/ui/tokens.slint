@@ -1,0 +1,69 @@
+// Tokens de la suite oxide::* (estilo Bento / Nothing OS).
+// Dark minimalista: negro dominante, un único acento rojo pastel, sin degradados ni glow.
+
+import "fonts/Doto-Black.ttf";
+import "fonts/JetBrainsMono-Regular.ttf";
+import "fonts/JetBrainsMono-Medium.ttf";
+import "fonts/InstrumentSans-Medium.ttf";
+import "fonts/InstrumentSans-SemiBold.ttf";
+
+export global Theme {
+    // Color
+    out property <color> bg: #000000;
+    out property <color> card: #131313;
+    out property <color> track: #242424;
+    out property <color> chip: #1F1F1F;
+    out property <color> nav: #181818;
+    out property <color> nav-active: #2A2A2A;
+    out property <color> divider: #222222;
+    out property <color> ink: #EDE9E6;
+    out property <color> muted: #8C8784;
+    // Rojo (antes #E8695B, demasiado anaranjado). 6,2:1 sobre negro, 4,8:1 sobre chip.
+    out property <color> accent: #E85D64;
+    out property <color> on-accent: #000000;
+    out property <color> scrim: #000000b3;
+
+    // Radios
+    out property <length> radius-hero: 32px;
+    out property <length> radius-macro: 28px;
+    out property <length> radius-list: 32px;
+    out property <length> radius-nav: 34px;
+    out property <length> radius-chip: 14px;
+    out property <length> radius-field: 18px;
+
+    // Espaciado
+    out property <length> screen-padding: 12px;
+    out property <length> gap: 8px;
+    out property <length> pad-hero: 24px;
+    out property <length> pad-macro: 16px;
+    out property <length> pad-list: 20px;
+
+    // Navegación flotante
+    out property <length> nav-height: 68px;
+    out property <length> nav-side: 12px;
+    out property <length> nav-bottom: 20px;
+    out property <length> fab-size: 56px;
+
+    // Tipografía
+    out property <string> font-dot: "Doto";
+    out property <string> font-mono: "JetBrains Mono";
+    out property <string> font-sans: "Instrument Sans";
+    // Tracking de etiquetas en mayúsculas (0.1em).
+    out property <float> tracking: 0.1;
+
+    // Objetivo táctil mínimo
+    out property <length> touch-min: 44px;
+}
+
+// Texturas de óxido generadas en Rust (`oxide_theme::patina`) y asignadas al arrancar.
+// Mientras estén vacías, los botones se pintan sin pátina.
+export global Patina {
+    in property <image> circle;
+    in property <image> pill;
+}
+
+// Arranque de las animaciones de entrada: la app lo pone a `true` tras pintar el primer
+// fotograma, para que las cifras, anillos y tarjetas se animen a la vista y no antes.
+export global Motion {
+    in-out property <bool> ready;
+}

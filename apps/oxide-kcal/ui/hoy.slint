@@ -1,0 +1,299 @@
+// Pantalla Hoy (Bento): héroe con anillo, tres macros cuadradas y lista del día.
+
+import { Theme, Card, Ring, Bar, Chip, Label, Mono, DotCounter, Sans, GhostButton, FadeIn } from "@oxide-theme";
+
+export struct MacroInfo {
+    label: string,
+    value: int,
+    goal: string,
+    progress: float,
+}
+
+export struct FoodRow {
+    id: int,
+    name: string,
+    meal: string,
+    kcal: string,
+    detail: string,
+}
+
+component MacroCard inherits Card {
+    in property <MacroInfo> info;
+    in property <int> index;
+    radius: Theme.radius-macro;
+    enter-delay: 80ms + self.index * 60ms;
+    accessible-role: groupbox;
+    accessible-label: root.info.label + " " + root.info.value + " " + root.info.goal;
+
+    VerticalLayout {
+        padding: Theme.pad-macro;
+        alignment: space-between;
+
+        Label {
+            text: root.info.label;
+            font-size: 10px;
+        }
+
+        VerticalLayout {
+            spacing: 8px;
+            DotCounter {
+                value: root.info.value;
+                font-size: 34px;
+            }
+            Bar {
+                progress: root.info.progress;
+                delay: 200ms + root.index * 90ms;
+            }
+            Label {
+                text: root.info.goal;
+                font-size: 10px;
+                letter-spacing: 0;
+            }
+        }
+    }
+}
+
+component FoodItem inherits FadeIn {
+    in property <FoodRow> item;
+    in property <bool> last;
+    in property <bool> expanded;
+    callback toggle();
+    callback delete();
+
+    background: touch.pressed ? Theme.chip : transparent;
+    animate background { duration: 140ms; }
+    accessible-role: list-item;
+    accessible-label: root.item.name + ", " + root.item.meal + ", " + root.item.kcal + " kcal";
+    accessible-expandable: true;
+    accessible-expanded: root.expanded;
+    accessible-action-default => {
+        root.toggle();
+    }
+
+    touch := TouchArea {
+        clicked => {
+            root.toggle();
+        }
+    }
+
+    VerticalLayout {
+        HorizontalLayout {
+            padding-top: 14px;
+            padding-bottom: 14px;
+            spacing: 12px;
+            VerticalLayout {
+                horizontal-stretch: 1;
+                spacing: 3px;
+                alignment: center;
+                Sans {
+                    text: root.item.name;
+                    overflow: elide;
+                }
+                Label {
+                    text: root.item.meal;
+                    font-size: 10px;
+                    letter-spacing: 0;
+                }
+            }
+            Mono {
+                text: root.item.kcal;
+                horizontal-alignment: right;
+            }
+        }
+
+        // Detalle desplegable: la altura se anima y el contenido se recorta.
+        Rectangle {
+            height: root.expanded ? details.preferred-height : 0px;
+            clip: true;
+            animate height { duration: 320ms; easing: cubic-bezier(0.22, 1, 0.36, 1); }
+            details := HorizontalLayout {
+                y: 0;
+                height: self.preferred-height;
+                padding-bottom: 14px;
+                spacing: 8px;
+                Label {
+                    horizontal-stretch: 1;
+                    text: root.item.detail;
+                    font-size: 10px;
+                    letter-spacing: 0;
+                    overflow: elide;
+                }
+                GhostButton {
+                    text: "BORRAR";
+                    text-color: Theme.accent;
+                    enabled: root.expanded;
+                    clicked => {
+                        root.delete();
+                    }
+                }
+            }
+        }
+
+        if !root.last: Rectangle {
+            height: 1px;
+            background: Theme.divider;
+        }
+    }
+}
+
+export component HoyPage inherits Flickable {
+    in property <length> bottom-space;
+    in property <int> kcal-value;
+    in property <string> goal-text;
+    in property <string> remaining-text;
+    in property <float> ring-progress;
+    in property <int> ring-percent;
+    in property <string> ring-description;
+    in property <[MacroInfo]> macros;
+    in property <[FoodRow]> foods;
+    in-out property <int> selected: -1;
+    callback delete-food(int);
+    callback edit-goals();
+
+    // Dos columnas: en vertical, una debajo de otra; en horizontal (`wide`), lado a lado.
+    in property <bool> wide;
+
+    property <length> pad: Theme.screen-padding;
+    property <length> top: 18px;
+    property <length> column-width: root.wide ? (root.width - 2 * root.pad - Theme.gap) / 2 : root.width - 2 * root.pad;
+    property <length> macro-size: (root.column-width - 2 * Theme.gap) / 3;
+
+    content-width: root.width;
+    content-height: max(root.height, max(summary.y + summary.height, day.y + day.height) + root.bottom-space);
+
+    // Resumen: héroe y macros.
+    summary := VerticalLayout {
+        x: root.pad;
+        y: root.top;
+        width: root.column-width;
+        height: self.preferred-height;
+        spacing: Theme.gap;
+        alignment: start;
+
+        // 1. Héroe: kcal consumidas + anillo.
+        Card {
+            radius: Theme.radius-hero;
+            accessible-role: button;
+            accessible-label: "Consumidas " + root.kcal-value + " " + root.goal-text + ". " + root.remaining-text + ". Editar objetivos";
+            accessible-action-default => {
+                root.edit-goals();
+            }
+
+            TouchArea {
+                clicked => {
+                    root.edit-goals();
+                }
+            }
+
+            HorizontalLayout {
+                padding-left: Theme.pad-hero;
+                padding-right: Theme.pad-hero;
+                padding-top: Theme.pad-hero;
+                padding-bottom: 22px;
+                spacing: 12px;
+
+                VerticalLayout {
+                    horizontal-stretch: 1;
+                    spacing: 14px;
+                    alignment: center;
+                    Label {
+                        text: "CONSUMIDAS";
+                    }
+                    VerticalLayout {
+                        spacing: 4px;
+                        DotCounter {
+                            value: root.kcal-value;
+                            duration: 900ms;
+                            font-size: 64px;
+                        }
+                        Label {
+                            text: root.goal-text;
+                            font-size: 12px;
+                            letter-spacing: 0;
+                        }
+                    }
+                    HorizontalLayout {
+                        alignment: start;
+                        Chip {
+                            text: root.remaining-text;
+                        }
+                    }
+                }
+
+                VerticalLayout {
+                    alignment: center;
+                    Ring {
+                        progress: root.ring-progress;
+                        percent: root.ring-percent;
+                        description: root.ring-description;
+                    }
+                }
+            }
+        }
+
+        // 2. Tres macros cuadradas.
+        HorizontalLayout {
+            spacing: Theme.gap;
+            for m[i] in root.macros: MacroCard {
+                info: m;
+                index: i;
+                width: root.macro-size;
+                height: root.macro-size;
+            }
+        }
+    }
+
+    // Lista del día: debajo del resumen o a su derecha.
+    day := VerticalLayout {
+        x: root.wide ? root.pad + root.column-width + Theme.gap : root.pad;
+        y: root.wide ? root.top : summary.y + summary.height + Theme.gap;
+        width: root.column-width;
+        height: self.preferred-height;
+        alignment: start;
+
+        // 3. Lista del día.
+        Card {
+            radius: Theme.radius-list;
+            enter-delay: 260ms;
+            accessible-role: list;
+            accessible-label: "Registros de hoy";
+
+            VerticalLayout {
+                if root.foods.length == 0: VerticalLayout {
+                    padding: 28px;
+                    spacing: 6px;
+                    alignment: center;
+                    Sans {
+                        text: "Sin registros hoy";
+                        horizontal-alignment: center;
+                    }
+                    Label {
+                        text: "PULSA + O MANTÉN EL MICRO Y HABLA";
+                        font-size: 10px;
+                        horizontal-alignment: center;
+                    }
+                }
+
+                if root.foods.length > 0: VerticalLayout {
+                    padding-left: Theme.pad-list;
+                    padding-right: Theme.pad-list;
+                    padding-top: 8px;
+                    padding-bottom: 8px;
+                    for food[i] in root.foods: FoodItem {
+                        item: food;
+                        enter-delay: 300ms + Math.min(i, 8) * 45ms;
+                        last: i == root.foods.length - 1;
+                        expanded: food.id == root.selected;
+                        toggle => {
+                            root.selected = food.id == root.selected ? -1 : food.id;
+                        }
+                        delete => {
+                            root.selected = -1;
+                            root.delete-food(food.id);
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

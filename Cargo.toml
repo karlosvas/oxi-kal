@@ -1,0 +1,33 @@
+[workspace]
+resolver = "3"
+members = ["crates/oxide-theme", "apps/oxide-kcal"]
+
+[workspace.package]
+edition = "2024"
+version = "0.1.0"
+license = "MIT"
+publish = false
+
+[workspace.dependencies]
+slint = { version = "1.18", default-features = false, features = ["std", "compat-1-2"] }
+slint-build = "1.18"
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+rusqlite = { version = "0.40", features = ["bundled"] }
+oxide-theme = { path = "crates/oxide-theme" }
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 4
+strip = true
+
+# Pegamento JNI sin optimizar. jni-sys 0.4 declara `jboolean = bool` y, optimizado, el
+# código aarch64 asume que ART devuelve el registro w0 limpio (0/1). En el teléfono es así,
+# pero bajo traducción ARM (emulador x86_64 con Berberis) no, y el arranque aborta. Son
+# crates de arranque/eventos: no afecta al rendimiento del renderizado.
+[profile.release.package.jni]
+opt-level = 0
+[profile.release.package.android-activity]
+opt-level = 0
+[profile.release.package.i-slint-backend-android-activity]
+opt-level = 0
